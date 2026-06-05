@@ -159,6 +159,7 @@ export type ToolId =
   | 'brush'
   | 'eraser'
   | 'fill'
+  | 'text'
   | 'eyedropper'
   | 'select-rect'
   | 'select-lasso'

@@ -11,9 +11,10 @@ import { History, pixelSnapshotCommand } from '../core/history';
 import { StrokeEngine } from '../engine/brush';
 import { BLACK, WHITE } from '../color/color';
 import { floodFill, fillRegion } from '../tools/fill';
-import { selectAll, invertSelection } from '../tools/selection';
+import { featherSelection, growSelection, invertSelection, selectAll, shrinkSelection } from '../tools/selection';
 import { moveLayerPixels } from '../tools/transform';
 import type { Selection } from '../types';
+import { renderText } from '../text';
 import {
   adjustBrightnessContrast,
   adjustHueSaturation,
@@ -21,10 +22,17 @@ import {
   gaussianBlur,
   grayscale,
   invertColors,
+  posterize,
   type BrightnessContrastOptions,
   type GaussianBlurOptions,
   type HueSaturationOptions,
   type LevelsOptions,
+  type PosterizeOptions,
+  type SharpenOptions,
+  sharpen,
+  sepia,
+  threshold,
+  type ThresholdOptions,
 } from '../filters';
 
 export type FilterName =
@@ -33,13 +41,20 @@ export type FilterName =
   | 'invert'
   | 'grayscale'
   | 'hue-saturation'
-  | 'levels';
+  | 'levels'
+  | 'sharpen'
+  | 'threshold'
+  | 'posterize'
+  | 'sepia';
 
 export type FilterOptions =
   | Partial<GaussianBlurOptions>
   | Partial<BrightnessContrastOptions>
   | Partial<HueSaturationOptions>
-  | Partial<LevelsOptions>;
+  | Partial<LevelsOptions>
+  | Partial<SharpenOptions>
+  | Partial<ThresholdOptions>
+  | Partial<PosterizeOptions>;
 
 /** Transient, non-reactive stroke state (kept out of the reactive store). */
 interface StrokeContext {
@@ -99,6 +114,7 @@ export interface AppState {
   setFillTolerance: (n: number) => void;
   floodFillAt: (x: number, y: number) => void;
   moveActiveLayer: (dx: number, dy: number) => void;
+  placeTextAt: (x: number, y: number, text: string) => void;
 
   // selection
   setSelection: (sel: Selection | null) => void;
@@ -106,6 +122,9 @@ export interface AppState {
   invertSelectionArea: () => void;
   clearSelection: () => void;
   fillSelectionWithPrimary: () => void;
+  growSelectionBy: (px: number) => void;
+  shrinkSelectionBy: (px: number) => void;
+  featherSelectionBy: (px: number) => void;
 
   // layers
   addLayer: () => void;
@@ -235,6 +254,26 @@ export const useStore = create<AppState>((set, get) => ({
     layer.pixels.set(moved);
     get().commitEdit('レイヤー移動', layer.id, before);
   },
+  placeTextAt: (x, y, text) => {
+    const { doc, primary } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked || !layer.visible) return;
+    if (text.length === 0) return;
+
+    const before = layer.pixels.slice();
+    renderText(layer.pixels, doc.width, doc.height, {
+      text,
+      x,
+      y,
+      color: primary,
+      scale: 2,
+      mask: doc.selection?.mask ?? null,
+    });
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('テキスト', layer.id, before);
+    }
+  },
 
   setSelection: (sel) => set({ doc: { ...get().doc, selection: sel }, rev: get().rev + 1 }),
   selectAllArea: () => {
@@ -254,6 +293,21 @@ export const useStore = create<AppState>((set, get) => ({
     const before = layer.pixels.slice();
     fillRegion(layer.pixels, doc.width, doc.height, primary, doc.selection?.mask ?? null);
     get().commitEdit('選択範囲を塗りつぶし', layer.id, before);
+  },
+  growSelectionBy: (px) => {
+    const { doc } = get();
+    if (!doc.selection) return;
+    set({ doc: { ...doc, selection: growSelection(doc.selection, px) }, rev: get().rev + 1 });
+  },
+  shrinkSelectionBy: (px) => {
+    const { doc } = get();
+    if (!doc.selection) return;
+    set({ doc: { ...doc, selection: shrinkSelection(doc.selection, px) }, rev: get().rev + 1 });
+  },
+  featherSelectionBy: (px) => {
+    const { doc } = get();
+    if (!doc.selection) return;
+    set({ doc: { ...doc, selection: featherSelection(doc.selection, px) }, rev: get().rev + 1 });
   },
 
   addLayer: () => {
@@ -380,6 +434,24 @@ export const useStore = create<AppState>((set, get) => ({
         }, selectionMask);
         break;
       }
+      case 'sharpen': {
+        const filterOpts = opts as Partial<SharpenOptions> | undefined;
+        sharpen(layer.pixels, doc.width, doc.height, { amount: filterOpts?.amount ?? 0.75 }, selectionMask);
+        break;
+      }
+      case 'threshold': {
+        const filterOpts = opts as Partial<ThresholdOptions> | undefined;
+        threshold(layer.pixels, doc.width, doc.height, { level: filterOpts?.level ?? 128 }, selectionMask);
+        break;
+      }
+      case 'posterize': {
+        const filterOpts = opts as Partial<PosterizeOptions> | undefined;
+        posterize(layer.pixels, doc.width, doc.height, { levels: filterOpts?.levels ?? 4 }, selectionMask);
+        break;
+      }
+      case 'sepia':
+        sepia(layer.pixels, doc.width, doc.height, selectionMask);
+        break;
     }
 
     if (!pixelsEqual(before, layer.pixels)) {

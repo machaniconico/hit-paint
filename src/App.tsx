@@ -21,12 +21,27 @@ const TOOLS: { id: ToolId; label: string; key: string }[] = [
   { id: 'brush', label: 'ブラシ', key: 'B' },
   { id: 'eraser', label: '消しゴム', key: 'E' },
   { id: 'fill', label: '塗りつぶし', key: 'G' },
+  { id: 'text', label: 'テキスト', key: 'T' },
   { id: 'eyedropper', label: 'スポイト', key: 'I' },
   { id: 'select-rect', label: '矩形選択', key: 'M' },
   { id: 'move', label: '移動', key: 'V' },
-  { id: 'transform', label: '変形', key: 'T' },
+  { id: 'transform', label: '変形', key: 'R' },
   { id: 'pan', label: '手のひら', key: 'H' },
 ];
+
+function screenToDoc(
+  sx: number,
+  sy: number,
+  vp: { panX: number; panY: number; zoom: number; rotation: number },
+) {
+  const x = sx - vp.panX;
+  const y = sy - vp.panY;
+  const cos = Math.cos(-vp.rotation);
+  const sin = Math.sin(-vp.rotation);
+  const rx = x * cos - y * sin;
+  const ry = x * sin + y * cos;
+  return { x: rx / vp.zoom, y: ry / vp.zoom };
+}
 
 export function App() {
   const s = useStore();
@@ -102,7 +117,19 @@ export function App() {
           ))}
         </aside>
 
-        <main className="stage">
+        <main
+          className="stage"
+          onPointerDownCapture={(e) => {
+            if (s.tool !== 'text') return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const rect = e.currentTarget.getBoundingClientRect();
+            const point = screenToDoc(e.clientX - rect.left, e.clientY - rect.top, s.viewport);
+            const text = window.prompt('テキストを入力');
+            if (text) s.placeTextAt(point.x, point.y, text);
+          }}
+        >
           <Canvas />
         </main>
 
@@ -176,6 +203,26 @@ export function App() {
                 onClick={() => s.applyFilter('invert')}>階調反転</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('grayscale')}>グレースケール</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('sharpen', { amount: 0.75 })}>シャープ</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('threshold', { level: 128 })}>しきい値</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('posterize', { levels: 4 })}>ポスタライズ</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('sepia')}>セピア</button>
+            </div>
+          </section>
+
+          <section className="panel selection-tools">
+            <h3>選択範囲</h3>
+            <div className="selection-grid">
+              <button className="mini" disabled={!s.doc.selection}
+                onClick={() => s.growSelectionBy(4)}>拡張</button>
+              <button className="mini" disabled={!s.doc.selection}
+                onClick={() => s.shrinkSelectionBy(4)}>収縮</button>
+              <button className="mini" disabled={!s.doc.selection}
+                onClick={() => s.featherSelectionBy(4)}>ぼかし</button>
             </div>
           </section>
 
