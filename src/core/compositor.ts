@@ -1,4 +1,4 @@
-import type { BlendMode, Layer, PaintDocument } from '../types';
+import type { BlendMode, Layer, LayerId, PaintDocument } from '../types';
 
 /** Per-channel blend function on normalized 0..1 backdrop(b) and source(s). */
 type BlendFn = (b: number, s: number) => number;
@@ -31,46 +31,7 @@ const BLENDS: Record<BlendMode, BlendFn> = {
 export function composite(doc: PaintDocument): ImageData {
   const { width, height } = doc;
   const out = new Uint8ClampedArray(width * height * 4); // starts transparent
-  // Track the alpha of the current clipping base per pixel for clipping masks.
-  for (let li = 0; li < doc.layers.length; li++) {
-    const layer = doc.layers[li];
-    if (!layer.visible || !layer.pixels || layer.opacity <= 0) continue;
-    if (layer.kind === 'group') continue;
-    const src = layer.pixels;
-    const blend = BLENDS[layer.blendMode] ?? BLENDS.normal;
-    const layerAlpha = layer.opacity;
-    // clipping mask source: alpha of the nearest lower non-clipping layer
-    let clipMask: Uint8ClampedArray | null = null;
-    if (layer.clipping) {
-      for (let k = li - 1; k >= 0; k--) {
-        const base = doc.layers[k];
-        if (!base.clipping && base.pixels) { clipMask = base.pixels; break; }
-      }
-    }
-    for (let i = 0; i < src.length; i += 4) {
-      let sa = (src[i + 3] / 255) * layerAlpha;
-      if (sa <= 0) continue;
-      if (clipMask) sa *= clipMask[i + 3] / 255;
-      if (sa <= 0) continue;
-      const da = out[i + 3] / 255;
-      const sr = src[i] / 255, sg = src[i + 1] / 255, sb = src[i + 2] / 255;
-      const dr = out[i] / 255, dg = out[i + 1] / 255, db = out[i + 2] / 255;
-      // Blended source color (only meaningful where backdrop is opaque).
-      const br = da > 0 ? blend(dr, sr) : sr;
-      const bg2 = da > 0 ? blend(dg, sg) : sg;
-      const bb = da > 0 ? blend(db, sb) : sb;
-      // Mix blended vs raw source by backdrop alpha (per W3C compositing).
-      const mr = (1 - da) * sr + da * br;
-      const mg = (1 - da) * sg + da * bg2;
-      const mb = (1 - da) * sb + da * bb;
-      const oa = sa + da * (1 - sa);
-      if (oa <= 0) continue;
-      out[i] = ((mr * sa + dr * da * (1 - sa)) / oa) * 255;
-      out[i + 1] = ((mg * sa + dg * da * (1 - sa)) / oa) * 255;
-      out[i + 2] = ((mb * sa + db * da * (1 - sa)) / oa) * 255;
-      out[i + 3] = oa * 255;
-    }
-  }
+  renderLayers(doc, doc.layers, out, topLevelChildIds(doc));
   return new ImageData(out, width, height);
 }
 
@@ -78,4 +39,101 @@ export function composite(doc: PaintDocument): ImageData {
 export function flattenToRGBA(doc: PaintDocument): Uint8ClampedArray {
   const img = composite(doc);
   return img.data;
+}
+
+function topLevelChildIds(doc: PaintDocument): Set<LayerId> {
+  const ids = new Set<LayerId>();
+  for (const layer of doc.layers) {
+    if (layer.kind !== 'group' || !layer.children) continue;
+    for (const id of layer.children) ids.add(id);
+  }
+  return ids;
+}
+
+function renderLayers(
+  doc: PaintDocument,
+  layers: Layer[],
+  out: Uint8ClampedArray,
+  skipIds?: Set<LayerId>,
+): void {
+  for (let li = 0; li < layers.length; li++) {
+    const layer = layers[li];
+    if (skipIds?.has(layer.id)) continue;
+    if (!layer.visible || layer.opacity <= 0) continue;
+
+    if (layer.kind === 'group') {
+      const groupBuffer = renderGroup(doc, layer);
+      compositeBuffer(out, groupBuffer, layer.opacity, layer.blendMode, layer.mask);
+      continue;
+    }
+
+    if (!layer.pixels) continue;
+    compositeBuffer(
+      out,
+      layer.pixels,
+      layer.opacity,
+      layer.blendMode,
+      layer.mask,
+      layer.clipping ? findClipMask(layers, li) : null,
+    );
+  }
+}
+
+function renderGroup(doc: PaintDocument, group: Layer): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(doc.width * doc.height * 4);
+  if (!group.children || group.children.length === 0) return out;
+
+  const byId = new Map<LayerId, Layer>();
+  for (const layer of doc.layers) byId.set(layer.id, layer);
+
+  const children: Layer[] = [];
+  for (const id of group.children) {
+    const child = byId.get(id);
+    if (child) children.push(child);
+  }
+  renderLayers(doc, children, out);
+  return out;
+}
+
+function findClipMask(layers: Layer[], layerIndex: number): Uint8ClampedArray | null {
+  for (let k = layerIndex - 1; k >= 0; k--) {
+    const base = layers[k];
+    if (!base.clipping && base.pixels) return base.pixels;
+  }
+  return null;
+}
+
+function compositeBuffer(
+  out: Uint8ClampedArray,
+  src: Uint8ClampedArray,
+  opacity: number,
+  blendMode: BlendMode,
+  mask?: Uint8ClampedArray,
+  clipMask?: Uint8ClampedArray | null,
+): void {
+  const blend = BLENDS[blendMode] ?? BLENDS.normal;
+  for (let i = 0, p = 0; i < src.length; i += 4, p++) {
+    let sa = (src[i + 3] / 255) * opacity;
+    if (sa <= 0) continue;
+    if (mask) sa *= mask[p] / 255;
+    if (clipMask) sa *= clipMask[i + 3] / 255;
+    if (sa <= 0) continue;
+    const da = out[i + 3] / 255;
+    const sr = src[i] / 255, sg = src[i + 1] / 255, sb = src[i + 2] / 255;
+    const dr = out[i] / 255, dg = out[i + 1] / 255, db = out[i + 2] / 255;
+    // Blended source color (only meaningful where backdrop is opaque).
+    const br = da > 0 ? blend(dr, sr) : sr;
+    const bg2 = da > 0 ? blend(dg, sg) : sg;
+    const bb = da > 0 ? blend(db, sb) : sb;
+    // Mix blended vs raw source by backdrop alpha (per W3C compositing).
+    const mr = (1 - da) * sr + da * br;
+    const mg = (1 - da) * sg + da * bg2;
+    const mb = (1 - da) * sb + da * bb;
+    const oa = sa + da * (1 - sa);
+    if (oa <= 0) continue;
+    out[i] = ((mr * sa + dr * da * (1 - sa)) / oa) * 255;
+    out[i + 1] = ((mg * sa + dg * da * (1 - sa)) / oa) * 255;
+    out[i + 2] = ((mb * sa + db * da * (1 - sa)) / oa) * 255;
+    out[i + 3] = oa * 255;
+  }
 }

@@ -76,6 +76,8 @@ export interface Layer {
   clipping: boolean;
   /** RGBA pixels, length = width*height*4. Undefined for groups. */
   pixels?: Uint8ClampedArray;
+  /** 8-bit visibility mask, length = width*height (0 = hide, 255 = show). */
+  mask?: Uint8ClampedArray;
   /** child layer ids, for kind==='group' */
   children?: LayerId[];
 }

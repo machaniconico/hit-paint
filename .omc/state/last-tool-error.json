@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"echo \\\"=== mission-state ===\\\" && cat .omc/state/mission-state.json 2>/dev/null; echo \\\"=== project-memory ===\\\" && cat .omc/project-memory.json 2>/dev/null; echo \\\"=== plans dir ===\\\" && ...",
-  "error": "Exit code 1\n=== mission-state ===\n{\n  \"updatedAt\": \"2026-06-05T12:43:57.064Z\",\n  \"missions\": []\n}=== project-memory ===\n{\n  \"version\": \"1.0.0\",\n  \"lastScanned\": 1780663689245,\n  \"projectRoot\": \"/mnt/d/workspace/hit-paint\",\n  \"techStack\": {\n    \"languages\": [\n      {\n        \"name\": \"JavaScript/TypeScript\",\n        \"version\": null,\n        \"confidence\": \"high\",\n        \"markers\": [\n          \"package.json\"\n        ]\n      },\n      {\n        \"name\": \"TypeScript\",\n        \"version\": null,\n        \"...",
-  "timestamp": "2026-06-05T12:48:45.184Z",
-  "retry_count": 2
-}

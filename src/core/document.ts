@@ -35,6 +35,26 @@ export function createRasterLayer(
   };
 }
 
+export function createLayerMask(width: number, height: number, fill = 255): Uint8ClampedArray {
+  const mask = new Uint8ClampedArray(width * height);
+  mask.fill(fill);
+  return mask;
+}
+
+export function createGroupLayer(name = 'グループ', children: LayerId[] = []): Layer {
+  return {
+    id: uid('group'),
+    name,
+    kind: 'group',
+    visible: true,
+    opacity: 1,
+    blendMode: 'normal',
+    locked: false,
+    clipping: false,
+    children,
+  };
+}
+
 export function createDocument(
   width = 1280,
   height = 720,
