@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 import { useStore, getActiveStroke } from '../state/store';
-import { composite } from '../core/compositor';
+import { compositeAuto } from '../core/gpu-compositor';
 import { rectSelection, lassoSelection } from '../tools/selection';
 import type { PointerSample, Selection } from '../types';
 
@@ -73,7 +73,7 @@ export function Canvas() {
     off.width = doc.width;
     off.height = doc.height;
     const octx = off.getContext('2d')!;
-    octx.putImageData(composite(doc), 0, 0);
+    octx.putImageData(compositeAuto(doc), 0, 0);
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, rev]);
