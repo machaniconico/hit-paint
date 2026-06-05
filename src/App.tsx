@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { useStore } from './state/store';
 import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
-import type { ToolId } from './types';
+import type { BlendMode, ToolId } from './types';
 import { BLEND_MODES } from './types';
 import { importPSD, exportPSD } from './io/psd';
 import { importCLIP, exportCLIP } from './io/clip';
@@ -29,6 +30,9 @@ const TOOLS: { id: ToolId; label: string; key: string }[] = [
 
 export function App() {
   const s = useStore();
+  const [blurRadius, setBlurRadius] = useState(4);
+  const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
+  const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
 
   const openFile = async () => {
     try {
@@ -155,8 +159,38 @@ export function App() {
             </button>
           </section>
 
+          <section className="panel filters">
+            <h3>フィルター</h3>
+            <label>ぼかし半径 <b>{blurRadius}px</b>
+              <input type="range" min={1} max={24} value={blurRadius}
+                onChange={(e) => setBlurRadius(+e.target.value)} />
+            </label>
+            <div className="filter-grid">
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('blur', { radius: blurRadius })}>ぼかし</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('brightness-contrast', { brightness: 10, contrast: 10 })}>
+                明るさ・コントラスト
+              </button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('invert')}>階調反転</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('grayscale')}>グレースケール</button>
+            </div>
+          </section>
+
           <section className="panel layers">
-            <h3>レイヤー <button className="mini" onClick={s.addLayer}>＋</button></h3>
+            <h3>
+              レイヤー
+              <span className="layer-actions">
+                <button className="mini" onClick={s.addLayer}>＋</button>
+                <button className="mini" disabled={!activeLayer}
+                  onClick={() => activeLayer && s.addLayerMask(activeLayer.id)}>マスク追加</button>
+                <button className="mini" disabled={!activeLayer?.mask}
+                  onClick={() => activeLayer && s.removeLayerMask(activeLayer.id)}>マスク削除</button>
+                <button className="mini" onClick={s.addGroup}>グループ</button>
+              </span>
+            </h3>
             <ul>
               {[...s.doc.layers].reverse().map((l) => (
                 <li key={l.id} className={l.id === s.doc.activeLayerId ? 'layer active' : 'layer'}
@@ -165,9 +199,10 @@ export function App() {
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => s.setLayerProps(l.id, { visible: e.target.checked })} />
                   <span className="name">{l.name}</span>
+                  {l.mask && <span className="mask-indicator" title="レイヤーマスクあり">MASK</span>}
                   <select value={l.blendMode}
                     onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => s.setLayerProps(l.id, { blendMode: e.target.value as any })}>
+                    onChange={(e) => s.setLayerProps(l.id, { blendMode: e.target.value as BlendMode })}>
                     {BLEND_MODES.map((b) => <option key={b} value={b}>{b}</option>)}
                   </select>
                   <button className="mini" onClick={(e) => { e.stopPropagation(); s.removeLayer(l.id); }}>🗑</button>

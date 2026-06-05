@@ -4,7 +4,8 @@ import type {
 } from '../types';
 import { DEFAULT_BRUSH, IDENTITY_VIEWPORT } from '../types';
 import {
-  createDocument, createRasterLayer, findLayer, activeLayer, layerIndex, uid,
+  createDocument, createRasterLayer, createLayerMask, createGroupLayer,
+  findLayer, activeLayer, layerIndex,
 } from '../core/document';
 import { History, pixelSnapshotCommand } from '../core/history';
 import { StrokeEngine } from '../engine/brush';
@@ -13,6 +14,32 @@ import { floodFill, fillRegion } from '../tools/fill';
 import { selectAll, invertSelection } from '../tools/selection';
 import { moveLayerPixels } from '../tools/transform';
 import type { Selection } from '../types';
+import {
+  adjustBrightnessContrast,
+  adjustHueSaturation,
+  adjustLevels,
+  gaussianBlur,
+  grayscale,
+  invertColors,
+  type BrightnessContrastOptions,
+  type GaussianBlurOptions,
+  type HueSaturationOptions,
+  type LevelsOptions,
+} from '../filters';
+
+export type FilterName =
+  | 'blur'
+  | 'brightness-contrast'
+  | 'invert'
+  | 'grayscale'
+  | 'hue-saturation'
+  | 'levels';
+
+export type FilterOptions =
+  | Partial<GaussianBlurOptions>
+  | Partial<BrightnessContrastOptions>
+  | Partial<HueSaturationOptions>
+  | Partial<LevelsOptions>;
 
 /** Transient, non-reactive stroke state (kept out of the reactive store). */
 interface StrokeContext {
@@ -25,6 +52,14 @@ let activeStroke: StrokeContext | null = null;
 export const getActiveStroke = () => activeStroke;
 
 const history = new History(60);
+
+function pixelsEqual(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
 
 export interface AppState {
   doc: PaintDocument;
@@ -79,6 +114,12 @@ export interface AppState {
   setLayerProps: (id: LayerId, patch: Partial<Layer>) => void;
   moveLayer: (id: LayerId, dir: -1 | 1) => void;
   mergeDown: (id: LayerId) => void;
+  addLayerMask: (id: LayerId) => void;
+  removeLayerMask: (id: LayerId) => void;
+  addGroup: () => void;
+
+  // filters
+  applyFilter: (name: FilterName, opts?: FilterOptions) => void;
 
   // history
   undo: () => void;
@@ -267,6 +308,83 @@ export const useStore = create<AppState>((set, get) => ({
     }
     const layers = doc.layers.filter((l) => l.id !== id);
     set({ doc: { ...doc, layers, activeLayerId: bottom.id }, rev: get().rev + 1 });
+  },
+  addLayerMask: (id) => {
+    const { doc } = get();
+    const layer = findLayer(doc, id);
+    if (!layer) return;
+    const mask = createLayerMask(doc.width, doc.height, 255);
+    const layers = doc.layers.map((l) => (l.id === id ? { ...l, mask } : l));
+    set({ doc: { ...doc, layers }, rev: get().rev + 1 });
+  },
+  removeLayerMask: (id) => {
+    const { doc } = get();
+    const layer = findLayer(doc, id);
+    if (!layer?.mask) return;
+    const layers = doc.layers.map((l) => (l.id === id ? { ...l, mask: undefined } : l));
+    set({ doc: { ...doc, layers }, rev: get().rev + 1 });
+  },
+  addGroup: () => {
+    const { doc } = get();
+    const activeId = doc.activeLayerId;
+    const group = createGroupLayer(`グループ ${doc.layers.filter((l) => l.kind === 'group').length + 1}`, activeId ? [activeId] : []);
+    const insertAt = activeId ? layerIndex(doc, activeId) + 1 : doc.layers.length;
+    const layers = [...doc.layers];
+    layers.splice(insertAt, 0, group);
+    set({ doc: { ...doc, layers, activeLayerId: group.id }, rev: get().rev + 1 });
+  },
+  applyFilter: (name, opts) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const selectionMask = doc.selection?.mask ?? null;
+
+    switch (name) {
+      case 'blur': {
+        const filterOpts = opts as Partial<GaussianBlurOptions> | undefined;
+        gaussianBlur(layer.pixels, doc.width, doc.height, { radius: filterOpts?.radius ?? 4 }, selectionMask);
+        break;
+      }
+      case 'brightness-contrast': {
+        const filterOpts = opts as Partial<BrightnessContrastOptions> | undefined;
+        adjustBrightnessContrast(layer.pixels, doc.width, doc.height, {
+          brightness: filterOpts?.brightness ?? 10,
+          contrast: filterOpts?.contrast ?? 10,
+        }, selectionMask);
+        break;
+      }
+      case 'invert':
+        invertColors(layer.pixels, doc.width, doc.height, selectionMask);
+        break;
+      case 'grayscale':
+        grayscale(layer.pixels, doc.width, doc.height, selectionMask);
+        break;
+      case 'hue-saturation': {
+        const filterOpts = opts as Partial<HueSaturationOptions> | undefined;
+        adjustHueSaturation(layer.pixels, doc.width, doc.height, {
+          hue: filterOpts?.hue ?? 0,
+          saturation: filterOpts?.saturation ?? 20,
+        }, selectionMask);
+        break;
+      }
+      case 'levels': {
+        const filterOpts = opts as Partial<LevelsOptions> | undefined;
+        adjustLevels(layer.pixels, doc.width, doc.height, {
+          inBlack: filterOpts?.inBlack ?? 16,
+          inWhite: filterOpts?.inWhite ?? 239,
+          gamma: filterOpts?.gamma ?? 1,
+          outBlack: filterOpts?.outBlack ?? 0,
+          outWhite: filterOpts?.outWhite ?? 255,
+        }, selectionMask);
+        break;
+      }
+    }
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('フィルター', layer.id, before);
+    }
   },
 
   undo: () => {

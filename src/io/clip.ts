@@ -90,7 +90,7 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     db.run(
       'CREATE TABLE hitpaint_layers (' +
         'idx INT, id TEXT, name TEXT, kind TEXT, visible INT, opacity REAL, blend TEXT, ' +
-        'clipping INT, locked INT, w INT, h INT, rgba BLOB, children TEXT);',
+        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT);',
     );
 
     // Meta (single row) --------------------------------------------------
@@ -104,8 +104,8 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     // Layers (in document order, bottom -> top) --------------------------
     const insertLayer = db.prepare(
       'INSERT INTO hitpaint_layers ' +
-        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, children) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
     );
     try {
       doc.layers.forEach((layer, index) => {
@@ -116,6 +116,11 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
         const blob = px
           ? // Copy into a plain Uint8Array view (sql.js stores raw bytes).
             new Uint8Array(px.buffer.slice(px.byteOffset, px.byteOffset + px.byteLength))
+          : new Uint8Array(0);
+        const mask = layer.mask
+          ? new Uint8Array(
+              layer.mask.buffer.slice(layer.mask.byteOffset, layer.mask.byteOffset + layer.mask.byteLength),
+            )
           : new Uint8Array(0);
         insertLayer.run([
           index,
@@ -130,6 +135,7 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
           doc.width,
           doc.height,
           blob,
+          mask,
           layer.children ? JSON.stringify(layer.children) : null,
         ]);
       });
@@ -159,6 +165,14 @@ function blobToPixels(value: SqlValue): Uint8ClampedArray {
   return new Uint8ClampedArray(0);
 }
 
+/** Coerce a sql.js BLOB value into a Uint8ClampedArray of mask coverage bytes. */
+function blobToMask(value: SqlValue): Uint8ClampedArray {
+  if (value instanceof Uint8Array) {
+    return new Uint8ClampedArray(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  }
+  return new Uint8ClampedArray(0);
+}
+
 /** Validate a stored blend string against the known set, falling back to normal. */
 function toBlendMode(value: SqlValue): BlendMode {
   if (typeof value === 'string' && (BLEND_MODES as string[]).includes(value)) {
@@ -178,6 +192,17 @@ function listTables(db: Database): Set<string> {
     }
   }
   return names;
+}
+
+/** True when a table has a named column. Missing tables/columns return false. */
+function tableHasColumn(db: Database, table: string, column: string): boolean {
+  try {
+    const res = db.exec(`PRAGMA table_info(${table});`);
+    if (res.length === 0) return false;
+    return res[0].values.some((row) => row[1] === column);
+  } catch {
+    return false;
+  }
 }
 
 /** Reconstruct a PaintDocument from HIT Paint's own round-trip schema. */
@@ -202,14 +227,30 @@ function importHitPaint(db: Database): ImportResult {
 
   // Layers (ordered by idx) --------------------------------------------
   const layers: Layer[] = [];
+  const hasMaskColumn = tableHasColumn(db, 'hitpaint_layers', 'mask');
   const layerRes = db.exec(
-    'SELECT id, name, kind, visible, opacity, blend, clipping, locked, rgba, children ' +
+    'SELECT id, name, kind, visible, opacity, blend, clipping, locked, rgba, ' +
+      (hasMaskColumn ? 'mask' : 'NULL AS mask') +
+      ', children ' +
       'FROM hitpaint_layers ORDER BY idx ASC;',
   );
   if (layerRes.length > 0) {
     const expected = width * height * 4;
+    const expectedMask = width * height;
     for (const row of layerRes[0].values) {
-      const [lId, lName, lKind, lVisible, lOpacity, lBlend, lClipping, lLocked, lRgba, lChildren] = row;
+      const [
+        lId,
+        lName,
+        lKind,
+        lVisible,
+        lOpacity,
+        lBlend,
+        lClipping,
+        lLocked,
+        lRgba,
+        lMask,
+        lChildren,
+      ] = row;
       // Trust the persisted `kind` rather than inferring it from blob size
       // (which conflated 0×0 rasters with groups).
       const kind = lKind === 'group' ? 'group' : 'raster';
@@ -232,6 +273,10 @@ function importHitPaint(db: Database): ImportResult {
         }
       } else {
         layer.children = typeof lChildren === 'string' ? (JSON.parse(lChildren) as string[]) : [];
+      }
+      const mask = blobToMask(lMask);
+      if (mask.length === expectedMask) {
+        layer.mask = mask;
       }
       layers.push(layer);
     }
