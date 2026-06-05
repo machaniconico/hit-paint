@@ -1,0 +1,182 @@
+import { useStore } from './state/store';
+import { Canvas } from './ui/Canvas';
+import { rgbaToHex, hexToRgba } from './color/color';
+import type { ToolId } from './types';
+import { BLEND_MODES } from './types';
+import { importPSD, exportPSD } from './io/psd';
+import { importCLIP, exportCLIP } from './io/clip';
+import { exportPNG, importImageFile } from './io/png';
+import { pickFile, downloadBlob } from './io/files';
+
+function guessMime(name: string): string {
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  if (name.endsWith('.webp')) return 'image/webp';
+  if (name.endsWith('.gif')) return 'image/gif';
+  return 'application/octet-stream';
+}
+
+const TOOLS: { id: ToolId; label: string; key: string }[] = [
+  { id: 'brush', label: 'ブラシ', key: 'B' },
+  { id: 'eraser', label: '消しゴム', key: 'E' },
+  { id: 'fill', label: '塗りつぶし', key: 'G' },
+  { id: 'eyedropper', label: 'スポイト', key: 'I' },
+  { id: 'select-rect', label: '矩形選択', key: 'M' },
+  { id: 'move', label: '移動', key: 'V' },
+  { id: 'transform', label: '変形', key: 'T' },
+  { id: 'pan', label: '手のひら', key: 'H' },
+];
+
+export function App() {
+  const s = useStore();
+
+  const openFile = async () => {
+    try {
+      const picked = await pickFile('.psd,.clip,.png,.jpg,.jpeg,.webp,.gif,image/*');
+      if (!picked) return;
+      const lower = picked.name.toLowerCase();
+      const result = lower.endsWith('.psd')
+        ? await importPSD(picked.buffer)
+        : lower.endsWith('.clip')
+          ? await importCLIP(picked.buffer)
+          : await importImageFile(picked.buffer, guessMime(lower), picked.name.replace(/\.[^.]+$/, ''));
+      s.loadDocument(result.doc);
+      if (result.warnings.length) {
+        // eslint-disable-next-line no-alert
+        alert('読み込み時の注意:\n' + result.warnings.join('\n'));
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert('読み込みに失敗しました: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const savePSD = () => {
+    const buf = exportPSD(useStore.getState().doc);
+    downloadBlob(new Blob([buf], { type: 'image/vnd.adobe.photoshop' }), `${s.doc.name}.psd`);
+  };
+  const saveCLIP = async () => {
+    const buf = await exportCLIP(useStore.getState().doc);
+    downloadBlob(new Blob([buf], { type: 'application/octet-stream' }), `${s.doc.name}.clip`);
+  };
+  const exportPng = async () => {
+    const blob = await exportPNG(useStore.getState().doc);
+    downloadBlob(blob, `${s.doc.name}.png`);
+  };
+
+  return (
+    <div className="app">
+      <header className="menubar">
+        <span className="brand">HIT&nbsp;Paint</span>
+        <button onClick={() => s.newDocument()}>新規</button>
+        <button onClick={openFile}>開く</button>
+        <button onClick={savePSD} title="Photoshop形式で保存">PSD保存</button>
+        <button onClick={saveCLIP} title="CLIP形式で保存（HIT Paintで再読込可）">CLIP保存</button>
+        <button onClick={exportPng}>PNG書き出し</button>
+        <span className="divider" />
+        <button onClick={s.undo} disabled={!s.canUndo}>元に戻す</button>
+        <button onClick={s.redo} disabled={!s.canRedo}>やり直し</button>
+        <span className="divider" />
+        <button onClick={s.selectAllArea}>全選択</button>
+        <button onClick={s.invertSelectionArea}>選択反転</button>
+        <button onClick={s.clearSelection} disabled={!s.doc.selection}>選択解除</button>
+        <span className="spacer" />
+        <span className="docinfo">{s.doc.name} — {s.doc.width}×{s.doc.height}</span>
+      </header>
+
+      <div className="body">
+        <aside className="toolbar">
+          {TOOLS.map((t) => (
+            <button
+              key={t.id}
+              className={s.tool === t.id ? 'tool active' : 'tool'}
+              title={`${t.label} (${t.key})`}
+              onClick={() => s.setTool(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </aside>
+
+        <main className="stage">
+          <Canvas />
+        </main>
+
+        <aside className="rightpanel">
+          <section className="panel">
+            <h3>カラー</h3>
+            <input
+              type="color"
+              value={rgbaToHex(s.primary)}
+              onChange={(e) => s.setPrimary(hexToRgba(e.target.value))}
+            />
+            <div className="swatches">
+              {['#000000', '#ffffff', '#ff3b30', '#34c759', '#007aff', '#ffcc00'].map((c) => (
+                <button key={c} className="swatch" style={{ background: c }}
+                  onClick={() => s.setPrimary(hexToRgba(c))} />
+              ))}
+            </div>
+          </section>
+
+          <section className="panel">
+            <h3>ブラシ</h3>
+            <label>サイズ <b>{s.brush.size}px</b>
+              <input type="range" min={1} max={300} value={s.brush.size}
+                onChange={(e) => s.setBrush({ size: +e.target.value })} />
+            </label>
+            <label>不透明度 <b>{Math.round(s.brush.opacity * 100)}%</b>
+              <input type="range" min={0} max={100} value={s.brush.opacity * 100}
+                onChange={(e) => s.setBrush({ opacity: +e.target.value / 100 })} />
+            </label>
+            <label>硬さ <b>{Math.round(s.brush.hardness * 100)}%</b>
+              <input type="range" min={0} max={100} value={s.brush.hardness * 100}
+                onChange={(e) => s.setBrush({ hardness: +e.target.value / 100 })} />
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={s.brush.pressureSize}
+                onChange={(e) => s.setBrush({ pressureSize: e.target.checked })} />
+              筆圧→サイズ
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={s.brush.pressureOpacity}
+                onChange={(e) => s.setBrush({ pressureOpacity: e.target.checked })} />
+              筆圧→不透明度
+            </label>
+          </section>
+
+          <section className="panel">
+            <h3>塗りつぶし</h3>
+            <label>許容値 <b>{s.fillTolerance}</b>
+              <input type="range" min={0} max={255} value={s.fillTolerance}
+                onChange={(e) => s.setFillTolerance(+e.target.value)} />
+            </label>
+            <button className="mini wide" onClick={s.fillSelectionWithPrimary}>
+              {s.doc.selection ? '選択範囲を描画色で塗る' : 'レイヤーを描画色で塗る'}
+            </button>
+          </section>
+
+          <section className="panel layers">
+            <h3>レイヤー <button className="mini" onClick={s.addLayer}>＋</button></h3>
+            <ul>
+              {[...s.doc.layers].reverse().map((l) => (
+                <li key={l.id} className={l.id === s.doc.activeLayerId ? 'layer active' : 'layer'}
+                  onClick={() => s.selectLayer(l.id)}>
+                  <input type="checkbox" checked={l.visible}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => s.setLayerProps(l.id, { visible: e.target.checked })} />
+                  <span className="name">{l.name}</span>
+                  <select value={l.blendMode}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => s.setLayerProps(l.id, { blendMode: e.target.value as any })}>
+                    {BLEND_MODES.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  <button className="mini" onClick={(e) => { e.stopPropagation(); s.removeLayer(l.id); }}>🗑</button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+}
