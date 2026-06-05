@@ -17,6 +17,19 @@ function makeMask(width: number, height: number, fill = 0): Uint8ClampedArray {
   return mask;
 }
 
+function cloneSelection(sel: Selection): Selection {
+  return {
+    mask: new Uint8ClampedArray(sel.mask),
+    width: sel.width,
+    height: sel.height,
+  };
+}
+
+function normalizeRadius(radius: number): number {
+  if (!Number.isFinite(radius) || radius <= 0) return 0;
+  return Math.floor(radius);
+}
+
 // ---------------------------------------------------------------------------
 // 全選択
 // ---------------------------------------------------------------------------
@@ -120,6 +133,157 @@ export function invertSelection(sel: Selection): Selection {
     mask[i] = 255 - sel.mask[i];
   }
   return { mask, width: sel.width, height: sel.height };
+}
+
+// ---------------------------------------------------------------------------
+// 選択範囲の精製
+// ---------------------------------------------------------------------------
+
+/** 8 近傍（チェビシェフ距離 radius）で選択範囲を膨張する。 */
+export function growSelection(sel: Selection, radius: number): Selection {
+  const r = normalizeRadius(radius);
+  if (r === 0) return cloneSelection(sel);
+
+  const { width, height } = sel;
+  const mask = makeMask(width, height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let max = 0;
+      for (let dy = -r; dy <= r && max < 255; dy++) {
+        const sy = y + dy;
+        if (sy < 0 || sy >= height) continue;
+        for (let dx = -r; dx <= r; dx++) {
+          const sx = x + dx;
+          if (sx < 0 || sx >= width) continue;
+          const value = sel.mask[sy * width + sx];
+          if (value > max) {
+            max = value;
+            if (max === 255) break;
+          }
+        }
+      }
+      mask[y * width + x] = max;
+    }
+  }
+
+  return { mask, width, height };
+}
+
+/** 8 近傍（チェビシェフ距離 radius）で選択範囲を収縮する。 */
+export function shrinkSelection(sel: Selection, radius: number): Selection {
+  const r = normalizeRadius(radius);
+  if (r === 0) return cloneSelection(sel);
+
+  const { width, height } = sel;
+  const mask = makeMask(width, height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let min = 255;
+      for (let dy = -r; dy <= r && min > 0; dy++) {
+        const sy = y + dy;
+        if (sy < 0 || sy >= height) {
+          min = 0;
+          break;
+        }
+        for (let dx = -r; dx <= r; dx++) {
+          const sx = x + dx;
+          if (sx < 0 || sx >= width) {
+            min = 0;
+            break;
+          }
+          const value = sel.mask[sy * width + sx];
+          if (value < min) min = value;
+        }
+      }
+      mask[y * width + x] = min;
+    }
+  }
+
+  return { mask, width, height };
+}
+
+/** 分離可能ボックスぼかしで選択範囲をフェザーする。 */
+export function featherSelection(sel: Selection, radius: number): Selection {
+  const r = normalizeRadius(radius);
+  if (r === 0) return cloneSelection(sel);
+
+  const { width, height } = sel;
+  const kernelSize = r * 2 + 1;
+  const temp = new Float64Array(width * height);
+  const mask = makeMask(width, height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0;
+      for (let dx = -r; dx <= r; dx++) {
+        const sx = x + dx;
+        if (sx >= 0 && sx < width) {
+          sum += sel.mask[y * width + sx];
+        }
+      }
+      temp[y * width + x] = sum / kernelSize;
+    }
+  }
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0;
+      for (let dy = -r; dy <= r; dy++) {
+        const sy = y + dy;
+        if (sy >= 0 && sy < height) {
+          sum += temp[sy * width + x];
+        }
+      }
+      mask[y * width + x] = sum / kernelSize;
+    }
+  }
+
+  return { mask, width, height };
+}
+
+// ---------------------------------------------------------------------------
+// 選択範囲の合成
+// ---------------------------------------------------------------------------
+
+export type SelectionCombineMode = 'replace' | 'add' | 'subtract' | 'intersect';
+
+/** 2 つの選択範囲を指定モードで合成する。 */
+export function combineSelection(
+  a: Selection,
+  b: Selection,
+  mode: SelectionCombineMode,
+): Selection {
+  if (a.width !== b.width || a.height !== b.height) {
+    return cloneSelection(a);
+  }
+
+  if (mode === 'replace') {
+    return cloneSelection(b);
+  }
+
+  const mask = makeMask(a.width, a.height);
+  for (let i = 0; i < mask.length; i++) {
+    const av = a.mask[i];
+    const bv = b.mask[i];
+    switch (mode) {
+      case 'add':
+        mask[i] = Math.max(av, bv);
+        break;
+      case 'subtract':
+        mask[i] = Math.min(av, 255 - bv);
+        break;
+      case 'intersect':
+        mask[i] = Math.min(av, bv);
+        break;
+      default:
+        mask[i] = av;
+        break;
+    }
+  }
+
+  return { mask, width: a.width, height: a.height };
 }
 
 // ---------------------------------------------------------------------------

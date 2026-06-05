@@ -12,8 +12,16 @@ import {
   lassoSelection,
   invertSelection,
   isEmpty,
+  growSelection,
+  shrinkSelection,
+  featherSelection,
+  combineSelection,
 } from '../src/tools/selection';
 import { moveLayerPixels } from '../src/tools/transform';
+
+function countSelected(mask: Uint8ClampedArray): number {
+  return Array.from(mask).filter((v) => v > 0).length;
+}
 
 // ---------------------------------------------------------------------------
 // selectAll
@@ -106,6 +114,97 @@ describe('invertSelection', () => {
     const sel = rectSelection(8, 8, 2, 2, 6, 6);
     const double = invertSelection(invertSelection(sel));
     expect(Array.from(double.mask)).toEqual(Array.from(sel.mask));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 選択範囲の精製・合成
+// ---------------------------------------------------------------------------
+
+describe('selection refinement', () => {
+  it('growSelection は 8 近傍で外周を増やす', () => {
+    const sel = rectSelection(5, 5, 2, 2, 3, 3);
+    const grown = growSelection(sel, 1);
+
+    expect(countSelected(grown.mask)).toBe(9);
+    expect(grown.mask[1 * 5 + 1]).toBe(255);
+    expect(grown.mask[3 * 5 + 3]).toBe(255);
+    expect(grown.mask[0]).toBe(0);
+    expect(countSelected(sel.mask)).toBe(1);
+  });
+
+  it('shrinkSelection は境界を削って選択範囲を減らす', () => {
+    const sel = selectAll(5, 5);
+    const shrunk = shrinkSelection(sel, 1);
+
+    expect(countSelected(shrunk.mask)).toBe(9);
+    expect(shrunk.mask[2 * 5 + 2]).toBe(255);
+    expect(shrunk.mask[0]).toBe(0);
+    expect(countSelected(sel.mask)).toBe(25);
+  });
+
+  it('featherSelection は境界に中間値を作る', () => {
+    const sel = rectSelection(5, 5, 2, 0, 5, 5);
+    const feathered = featherSelection(sel, 1);
+
+    const outsideBoundary = feathered.mask[2 * 5 + 1];
+    const insideBoundary = feathered.mask[2 * 5 + 2];
+    expect(outsideBoundary).toBeGreaterThan(0);
+    expect(outsideBoundary).toBeLessThan(255);
+    expect(insideBoundary).toBeGreaterThan(0);
+    expect(insideBoundary).toBeLessThan(255);
+    expect(Array.from(sel.mask)).toEqual(Array.from(rectSelection(5, 5, 2, 0, 5, 5).mask));
+  });
+});
+
+describe('combineSelection', () => {
+  it('replace は b の選択で置き換える', () => {
+    const a = rectSelection(3, 1, 0, 0, 1, 1);
+    const b = rectSelection(3, 1, 2, 0, 3, 1);
+
+    const combined = combineSelection(a, b, 'replace');
+
+    expect(Array.from(combined.mask)).toEqual([0, 0, 255]);
+    expect(combined.mask).not.toBe(b.mask);
+  });
+
+  it('add は coverage の max を取る', () => {
+    const a = rectSelection(3, 1, 0, 0, 2, 1);
+    const b = rectSelection(3, 1, 1, 0, 3, 1);
+
+    const combined = combineSelection(a, b, 'add');
+
+    expect(Array.from(combined.mask)).toEqual([255, 255, 255]);
+  });
+
+  it('subtract は b の選択部分を a から取り除く', () => {
+    const a = rectSelection(3, 1, 0, 0, 3, 1);
+    const b = rectSelection(3, 1, 1, 0, 2, 1);
+
+    const combined = combineSelection(a, b, 'subtract');
+
+    expect(Array.from(combined.mask)).toEqual([255, 0, 255]);
+  });
+
+  it('intersect は coverage の min を取る', () => {
+    const a = rectSelection(3, 1, 0, 0, 2, 1);
+    const b = rectSelection(3, 1, 1, 0, 3, 1);
+
+    const combined = combineSelection(a, b, 'intersect');
+
+    expect(Array.from(combined.mask)).toEqual([0, 255, 0]);
+  });
+
+  it('サイズ不一致なら a と同じ内容の新しい選択を返す', () => {
+    const a = rectSelection(3, 1, 0, 0, 2, 1);
+    const b = selectAll(2, 1);
+
+    const combined = combineSelection(a, b, 'add');
+
+    expect(combined).not.toBe(a);
+    expect(combined.width).toBe(a.width);
+    expect(combined.height).toBe(a.height);
+    expect(Array.from(combined.mask)).toEqual(Array.from(a.mask));
   });
 });
 

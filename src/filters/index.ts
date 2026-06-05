@@ -20,6 +20,18 @@ export interface LevelsOptions {
   outWhite: number;
 }
 
+export interface SharpenOptions {
+  amount: number;
+}
+
+export interface ThresholdOptions {
+  level: number;
+}
+
+export interface PosterizeOptions {
+  levels: number;
+}
+
 type Mask = Uint8ClampedArray | null | undefined;
 
 function clamp255(value: number): number {
@@ -323,6 +335,127 @@ export function adjustLevels(
       const filtered = outBlack + corrected * (outWhite - outBlack);
       pixels[i + channel] = blendChannel(original, filtered, coverage);
     }
+  }
+
+  return pixels;
+}
+
+export function sharpen(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opts: SharpenOptions,
+  mask?: Mask,
+): Uint8ClampedArray {
+  const amount = Math.max(0, Math.min(2, opts.amount));
+  if (amount === 0 || width <= 0 || height <= 0) return pixels;
+
+  const source = new Uint8ClampedArray(pixels);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const pixel = y * width + x;
+      const coverage = maskCoverage(mask, pixel);
+      if (coverage <= 0) continue;
+
+      const center = rgbaIndex(x, y, width);
+      const left = rgbaIndex(Math.max(0, x - 1), y, width);
+      const right = rgbaIndex(Math.min(width - 1, x + 1), y, width);
+      const top = rgbaIndex(x, Math.max(0, y - 1), width);
+      const bottom = rgbaIndex(x, Math.min(height - 1, y + 1), width);
+
+      for (let channel = 0; channel < 3; channel++) {
+        const original = source[center + channel];
+        const laplacian = (4 * original)
+          - source[left + channel]
+          - source[right + channel]
+          - source[top + channel]
+          - source[bottom + channel];
+        pixels[center + channel] = blendChannel(original, original + laplacian * amount, coverage);
+      }
+    }
+  }
+
+  return pixels;
+}
+
+export function threshold(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opts: ThresholdOptions,
+  mask?: Mask,
+): Uint8ClampedArray {
+  const level = Math.max(0, Math.min(255, opts.level));
+
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const coverage = maskCoverage(mask, pixel);
+    if (coverage <= 0) continue;
+
+    const i = pixel * 4;
+    const originalR = pixels[i];
+    const originalG = pixels[i + 1];
+    const originalB = pixels[i + 2];
+    const luminance = 0.299 * originalR + 0.587 * originalG + 0.114 * originalB;
+    const filtered = luminance >= level ? 255 : 0;
+
+    pixels[i] = blendChannel(originalR, filtered, coverage);
+    pixels[i + 1] = blendChannel(originalG, filtered, coverage);
+    pixels[i + 2] = blendChannel(originalB, filtered, coverage);
+  }
+
+  return pixels;
+}
+
+export function posterize(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opts: PosterizeOptions,
+  mask?: Mask,
+): Uint8ClampedArray {
+  const levels = Math.max(2, Math.min(255, Math.round(opts.levels)));
+  const step = 255 / (levels - 1);
+
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const coverage = maskCoverage(mask, pixel);
+    if (coverage <= 0) continue;
+
+    const i = pixel * 4;
+    for (let channel = 0; channel < 3; channel++) {
+      const original = pixels[i + channel];
+      const filtered = Math.round(original / step) * step;
+      pixels[i + channel] = blendChannel(original, filtered, coverage);
+    }
+  }
+
+  return pixels;
+}
+
+export function sepia(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  optsOrMask?: Mask | Record<string, never>,
+  mask?: Mask,
+): Uint8ClampedArray {
+  const resolvedMask = resolveNoOptionsMask(optsOrMask, mask);
+
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const coverage = maskCoverage(resolvedMask, pixel);
+    if (coverage <= 0) continue;
+
+    const i = pixel * 4;
+    const originalR = pixels[i];
+    const originalG = pixels[i + 1];
+    const originalB = pixels[i + 2];
+    const filteredR = 0.393 * originalR + 0.769 * originalG + 0.189 * originalB;
+    const filteredG = 0.349 * originalR + 0.686 * originalG + 0.168 * originalB;
+    const filteredB = 0.272 * originalR + 0.534 * originalG + 0.131 * originalB;
+
+    pixels[i] = blendChannel(originalR, filteredR, coverage);
+    pixels[i + 1] = blendChannel(originalG, filteredG, coverage);
+    pixels[i + 2] = blendChannel(originalB, filteredB, coverage);
   }
 
   return pixels;
