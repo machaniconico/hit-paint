@@ -35,6 +35,13 @@ import type {
   RGBA,
 } from '../types';
 import type { TextLayerData } from '../text/text-layer';
+import type { ShapeData } from '../vector/shape';
+import type {
+  VectorLayerData,
+  VectorPath,
+  VectorStroke,
+  VectorSubpath,
+} from '../vector/vector-layer';
 import { BLEND_MODES } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -93,7 +100,8 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     db.run(
       'CREATE TABLE hitpaint_layers (' +
         'idx INT, id TEXT, name TEXT, kind TEXT, visible INT, opacity REAL, blend TEXT, ' +
-        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT, adjustment TEXT, textData TEXT);',
+        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT, adjustment TEXT, ' +
+        'textData TEXT, vectorData TEXT, shapeData TEXT);',
     );
 
     // Meta (single row) --------------------------------------------------
@@ -107,8 +115,8 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     // Layers (in document order, bottom -> top) --------------------------
     const insertLayer = db.prepare(
       'INSERT INTO hitpaint_layers ' +
-        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment, textData) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment, textData, vectorData, shapeData) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
     );
     try {
       doc.layers.forEach((layer, index) => {
@@ -142,6 +150,8 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
           layer.children ? JSON.stringify(layer.children) : null,
           layer.kind === 'adjustment' && layer.adjustment ? JSON.stringify(layer.adjustment) : null,
           layer.textData ? JSON.stringify(layer.textData) : null,
+          layer.vectorData ? JSON.stringify(layer.vectorData) : null,
+          layer.shapeData ? JSON.stringify(layer.shapeData) : null,
         ]);
       });
     } finally {
@@ -272,6 +282,206 @@ function parseTextData(value: SqlValue): TextLayerData | undefined {
   }
 }
 
+function parseShapeKind(value: unknown): ShapeData['shape'] | null {
+  if (
+    value === 'rect' ||
+    value === 'rounded-rect' ||
+    value === 'ellipse' ||
+    value === 'polygon' ||
+    value === 'star' ||
+    value === 'line'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function parseShapeData(value: SqlValue): ShapeData | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const {
+      shape,
+      x,
+      y,
+      width,
+      height,
+      cornerRadius,
+      sides,
+      innerRatio,
+      style,
+    } = parsed as {
+      shape?: unknown;
+      x?: unknown;
+      y?: unknown;
+      width?: unknown;
+      height?: unknown;
+      cornerRadius?: unknown;
+      sides?: unknown;
+      innerRatio?: unknown;
+      style?: unknown;
+    };
+    const shapeKind = parseShapeKind(shape);
+    if (
+      !shapeKind ||
+      !isFiniteNumber(x) ||
+      !isFiniteNumber(y) ||
+      !isFiniteNumber(width) ||
+      !isFiniteNumber(height) ||
+      !style ||
+      typeof style !== 'object' ||
+      Array.isArray(style)
+    ) {
+      return undefined;
+    }
+
+    const { fill, stroke } = style as { fill?: unknown; stroke?: unknown };
+    const shapeData: ShapeData = {
+      shape: shapeKind,
+      x,
+      y,
+      width,
+      height,
+      style: {},
+    };
+
+    if (fill !== undefined) {
+      if (fill === null) {
+        shapeData.style.fill = null;
+      } else {
+        const parsedFill = parseTextColor(fill);
+        if (!parsedFill) return undefined;
+        shapeData.style.fill = parsedFill;
+      }
+    }
+
+    if (stroke !== undefined) {
+      if (stroke === null) {
+        shapeData.style.stroke = null;
+      } else {
+        if (!stroke || typeof stroke !== 'object' || Array.isArray(stroke)) return undefined;
+        const { color, width: strokeWidth } = stroke as { color?: unknown; width?: unknown };
+        const parsedStrokeColor = parseTextColor(color);
+        if (!parsedStrokeColor || !isFiniteNumber(strokeWidth)) return undefined;
+        shapeData.style.stroke = { color: parsedStrokeColor, width: strokeWidth };
+      }
+    }
+
+    if (cornerRadius !== undefined) {
+      if (!isFiniteNumber(cornerRadius)) return undefined;
+      shapeData.cornerRadius = cornerRadius;
+    }
+    if (sides !== undefined) {
+      if (!isFiniteNumber(sides)) return undefined;
+      shapeData.sides = sides;
+    }
+    if (innerRatio !== undefined) {
+      if (!isFiniteNumber(innerRatio)) return undefined;
+      shapeData.innerRatio = innerRatio;
+    }
+
+    return shapeData;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseVectorPath(value: unknown): VectorPath | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { closed, points } = value as { closed?: unknown; points?: unknown };
+  if (typeof closed !== 'boolean' || !Array.isArray(points)) return null;
+  const parsedPoints = points.map((point) => {
+    if (!point || typeof point !== 'object' || Array.isArray(point)) return null;
+    const { x, y } = point as { x?: unknown; y?: unknown };
+    if (!isFiniteNumber(x) || !isFiniteNumber(y)) return null;
+    return { x, y };
+  });
+  if (parsedPoints.some((point) => point === null)) return null;
+  return { closed, points: parsedPoints as { x: number; y: number }[] };
+}
+
+function parseNumberArray(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const numbers: number[] = [];
+  for (const item of value) {
+    if (!isFiniteNumber(item)) return null;
+    numbers.push(item);
+  }
+  return numbers;
+}
+
+function parseVectorStroke(value: unknown): VectorStroke | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { color, width, dash, dashArray, dashOffset } = value as {
+    color?: unknown;
+    width?: unknown;
+    dash?: unknown;
+    dashArray?: unknown;
+    dashOffset?: unknown;
+  };
+  const parsedColor = parseTextColor(color);
+  if (!parsedColor || !isFiniteNumber(width)) return null;
+  const stroke: VectorStroke = { color: parsedColor, width };
+  if (dash !== undefined) {
+    const parsedDash = parseNumberArray(dash);
+    if (!parsedDash) return null;
+    stroke.dash = parsedDash;
+  }
+  if (dashArray !== undefined) {
+    const parsedDashArray = parseNumberArray(dashArray);
+    if (!parsedDashArray) return null;
+    stroke.dashArray = parsedDashArray;
+  }
+  if (dashOffset !== undefined) {
+    if (!isFiniteNumber(dashOffset)) return null;
+    stroke.dashOffset = dashOffset;
+  }
+  return stroke;
+}
+
+function parseVectorSubpath(value: unknown): VectorSubpath | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { path, fill, stroke } = value as { path?: unknown; fill?: unknown; stroke?: unknown };
+  const parsedPath = parseVectorPath(path);
+  if (!parsedPath) return null;
+  const subpath: VectorSubpath = { path: parsedPath };
+  if (fill !== undefined) {
+    if (fill === null) {
+      subpath.fill = null;
+    } else {
+      const parsedFill = parseTextColor(fill);
+      if (!parsedFill) return null;
+      subpath.fill = parsedFill;
+    }
+  }
+  if (stroke !== undefined) {
+    if (stroke === null) {
+      subpath.stroke = null;
+    } else {
+      const parsedStroke = parseVectorStroke(stroke);
+      if (!parsedStroke) return null;
+      subpath.stroke = parsedStroke;
+    }
+  }
+  return subpath;
+}
+
+function parseVectorData(value: SqlValue): VectorLayerData | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const { subpaths } = parsed as { subpaths?: unknown };
+    if (!Array.isArray(subpaths)) return undefined;
+    const parsedSubpaths = subpaths.map(parseVectorSubpath);
+    if (parsedSubpaths.some((subpath) => subpath === null)) return undefined;
+    return { subpaths: parsedSubpaths as VectorSubpath[] };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read the names of all user tables in the database. */
 function listTables(db: Database): Set<string> {
   const names = new Set<string>();
@@ -323,6 +533,8 @@ function importHitPaint(db: Database): ImportResult {
   const hasChildrenColumn = tableHasColumn(db, 'hitpaint_layers', 'children');
   const hasAdjustmentColumn = tableHasColumn(db, 'hitpaint_layers', 'adjustment');
   const hasTextDataColumn = tableHasColumn(db, 'hitpaint_layers', 'textData');
+  const hasVectorDataColumn = tableHasColumn(db, 'hitpaint_layers', 'vectorData');
+  const hasShapeDataColumn = tableHasColumn(db, 'hitpaint_layers', 'shapeData');
   const layerRes = db.exec(
     'SELECT id, name, ' +
       (hasKindColumn ? 'kind' : "'raster' AS kind") +
@@ -334,6 +546,10 @@ function importHitPaint(db: Database): ImportResult {
       (hasAdjustmentColumn ? 'adjustment' : 'NULL AS adjustment') +
       ', ' +
       (hasTextDataColumn ? 'textData' : 'NULL AS textData') +
+      ', ' +
+      (hasVectorDataColumn ? 'vectorData' : 'NULL AS vectorData') +
+      ', ' +
+      (hasShapeDataColumn ? 'shapeData' : 'NULL AS shapeData') +
       ' FROM hitpaint_layers ORDER BY idx ASC;',
   );
   if (layerRes.length > 0) {
@@ -354,6 +570,8 @@ function importHitPaint(db: Database): ImportResult {
         lChildren,
         lAdjustment,
         lTextData,
+        lVectorData,
+        lShapeData,
       ] = row;
       const adjustment = parseAdjustment(lAdjustment);
       const kind = lKind === 'group' ? 'group' : lKind === 'adjustment' && adjustment ? 'adjustment' : 'raster';
@@ -380,6 +598,14 @@ function importHitPaint(db: Database): ImportResult {
         const textData = parseTextData(lTextData);
         if (textData) {
           layer.textData = textData;
+        }
+        const vectorData = parseVectorData(lVectorData);
+        if (vectorData) {
+          layer.vectorData = vectorData;
+        }
+        const shapeData = parseShapeData(lShapeData);
+        if (shapeData) {
+          layer.shapeData = shapeData;
         }
       } else if (kind === 'group') {
         layer.children = parseChildren(lChildren);

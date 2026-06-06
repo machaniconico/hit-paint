@@ -40,6 +40,7 @@ function selectionBounds(sel: Selection | null) {
 type Gesture =
   | { type: 'move'; startX: number; startY: number; lastX: number; lastY: number }
   | { type: 'rect'; startX: number; startY: number; lastX: number; lastY: number }
+  | { type: 'shape'; startX: number; startY: number; lastX: number; lastY: number }
   | { type: 'lasso'; points: { x: number; y: number }[] };
 
 export function Canvas() {
@@ -59,6 +60,7 @@ export function Canvas() {
   const moveActiveLayer = useStore((s) => s.moveActiveLayer);
   const setSelection = useStore((s) => s.setSelection);
   const setViewport = useStore((s) => s.setViewport);
+  const addShapeLayer = useStore((s) => s.addShapeLayer);
 
   const panState = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const gesture = useRef<Gesture | null>(null);
@@ -132,7 +134,7 @@ export function Canvas() {
 
     // in-progress gesture preview
     const g = gesture.current;
-    if (g && g.type === 'rect') {
+    if (g && (g.type === 'rect' || g.type === 'shape')) {
       const x = Math.min(g.startX, g.lastX), y = Math.min(g.startY, g.lastY);
       ctx.lineWidth = 1 / viewport.zoom;
       ctx.setLineDash([4 / viewport.zoom, 4 / viewport.zoom]);
@@ -198,6 +200,7 @@ export function Canvas() {
       case 'move':
       case 'transform': gesture.current = { type: 'move', startX: s.x, startY: s.y, lastX: s.x, lastY: s.y }; break;
       case 'select-rect': gesture.current = { type: 'rect', startX: s.x, startY: s.y, lastX: s.x, lastY: s.y }; break;
+      case 'shape': gesture.current = { type: 'shape', startX: s.x, startY: s.y, lastX: s.x, lastY: s.y }; break;
       case 'select-lasso': gesture.current = { type: 'lasso', points: [{ x: s.x, y: s.y }] }; break;
     }
   };
@@ -236,6 +239,10 @@ export function Canvas() {
       const w = Math.abs(g.lastX - g.startX), h = Math.abs(g.lastY - g.startY);
       if (w < 1 || h < 1) setSelection(null);
       else setSelection(rectSelection(doc.width, doc.height, g.startX, g.startY, g.lastX, g.lastY));
+    } else if (g.type === 'shape') {
+      const x = Math.min(g.startX, g.lastX), y = Math.min(g.startY, g.lastY);
+      const width = Math.abs(g.lastX - g.startX), height = Math.abs(g.lastY - g.startY);
+      if (width >= 1 && height >= 1) addShapeLayer({ x, y, width, height });
     } else if (g.type === 'lasso') {
       if (g.points.length >= 3) setSelection(lassoSelection(doc.width, doc.height, g.points));
       else setSelection(null);

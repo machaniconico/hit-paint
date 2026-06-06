@@ -27,6 +27,7 @@ const TOOLS: { id: ToolId; label: string; key: string }[] = [
   { id: 'gradient', label: 'グラデーション', key: 'Shift+G' },
   { id: 'pen', label: 'ペン', key: 'P' },
   { id: 'text', label: 'テキスト', key: 'T' },
+  { id: 'shape', label: 'シェイプ', key: 'U' },
   { id: 'eyedropper', label: 'スポイト', key: 'I' },
   { id: 'liquify', label: '液状化', key: 'L' },
   { id: 'select-rect', label: '矩形選択', key: 'M' },
@@ -783,6 +784,8 @@ export function App() {
               レイヤー
               <span className="layer-actions">
                 <button className="mini" onClick={s.addLayer}>＋</button>
+                <button className="mini" onClick={() => s.addShapeLayer()}>シェイプレイヤー追加</button>
+                <button className="mini" onClick={() => s.addVectorLayer()}>ベクターレイヤー追加</button>
                 <button className="mini" disabled={!canMaskActive || !activeLayer}
                   onClick={() => activeLayer && s.addLayerMask(activeLayer.id)}>マスク追加</button>
                 <button className="mini" disabled={!activeLayer?.mask}

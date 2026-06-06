@@ -1,6 +1,10 @@
 import type { AdjustmentSpec, Layer, LayerId, PaintDocument, RGBA } from '../types';
 import type { TextLayerData } from '../text/text-layer';
 import { rasterizeTextLayer } from '../text/text-layer';
+import type { ShapeData } from '../vector/shape';
+import { rasterizeShape } from '../vector/shape';
+import type { VectorLayerData } from '../vector/vector-layer';
+import { rasterizeVectorLayer } from '../vector/vector-layer';
 
 let _counter = 0;
 /** Deterministic-ish unique id (avoids Math.random for testability). */
@@ -54,6 +58,46 @@ export function createTextLayer(
     clipping: false,
     pixels: rasterizeTextLayer(data, width, height),
     textData: data,
+  };
+}
+
+export function createShapeLayer(
+  width: number,
+  height: number,
+  data: ShapeData,
+  name = 'シェイプ',
+): Layer {
+  return {
+    id: uid('shape'),
+    name,
+    kind: 'raster',
+    visible: true,
+    opacity: 1,
+    blendMode: 'normal',
+    locked: false,
+    clipping: false,
+    pixels: rasterizeShape(data, width, height),
+    shapeData: data,
+  };
+}
+
+export function createVectorLayer(
+  width: number,
+  height: number,
+  data: VectorLayerData,
+  name = 'ベクター',
+): Layer {
+  return {
+    id: uid('vector'),
+    name,
+    kind: 'raster',
+    visible: true,
+    opacity: 1,
+    blendMode: 'normal',
+    locked: false,
+    clipping: false,
+    pixels: rasterizeVectorLayer(data, width, height),
+    vectorData: data,
   };
 }
 

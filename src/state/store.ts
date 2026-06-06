@@ -7,6 +7,7 @@ import type { TextLayerData } from '../text/text-layer';
 import { DEFAULT_BRUSH, IDENTITY_VIEWPORT } from '../types';
 import {
   createAdjustmentLayer, createDocument, createRasterLayer, createLayerMask, createGroupLayer, createTextLayer,
+  createShapeLayer, createVectorLayer,
   findLayer, activeLayer, layerIndex,
 } from '../core/document';
 import { addToGroup, removeFromGroup } from '../core/group-ops';
@@ -27,6 +28,13 @@ import { alignOffset, opaqueBounds, translatePixels, type AlignMode } from '../c
 import type { BlendMode, Selection } from '../types';
 import { renderText } from '../text';
 import { createTextLayerData, rasterizeTextLayer, updateTextLayerData } from '../text/text-layer';
+import { createShapeData, rasterizeShape, updateShapeData, type ShapeData } from '../vector/shape';
+import {
+  createVectorLayerData,
+  rasterizeVectorLayer,
+  updateVectorLayerData,
+  type VectorLayerData,
+} from '../vector/vector-layer';
 import {
   adjustBrightnessContrast,
   adjustHueSaturation,
@@ -396,12 +404,36 @@ function cloneTextLayerData(data: TextLayerData): TextLayerData {
   return { ...data, color: { ...data.color } };
 }
 
+function cloneShapeData(data: ShapeData): ShapeData {
+  return {
+    ...data,
+    style: {
+      fill: data.style.fill ? { ...data.style.fill } : data.style.fill,
+      stroke: data.style.stroke ? {
+        color: { ...data.style.stroke.color },
+        width: data.style.stroke.width,
+      } : data.style.stroke,
+    },
+  };
+}
+
+function cloneVectorLayerData(data: VectorLayerData): VectorLayerData {
+  return createVectorLayerData(data);
+}
+
+interface LayerEditDataSnapshot {
+  shapeData?: ShapeData;
+  vectorData?: VectorLayerData;
+}
+
 function cloneLayerSnapshot(layer: Layer): Layer {
   return {
     ...layer,
     pixels: layer.pixels?.slice(),
     mask: layer.mask?.slice(),
     textData: layer.textData ? cloneTextLayerData(layer.textData) : undefined,
+    shapeData: layer.shapeData ? cloneShapeData(layer.shapeData) : undefined,
+    vectorData: layer.vectorData ? cloneVectorLayerData(layer.vectorData) : undefined,
     children: layer.children ? [...layer.children] : undefined,
     adjustment: layer.adjustment ? { ...layer.adjustment, opts: layer.adjustment.opts ? { ...layer.adjustment.opts } : undefined } : undefined,
   };
@@ -467,6 +499,14 @@ function textLayerDataEquals(a: TextLayerData, b: TextLayerData): boolean {
     && a.color.b === b.color.b
     && a.color.a === b.color.a
   );
+}
+
+function shapeDataEquals(a: ShapeData, b: ShapeData): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function vectorLayerDataEquals(a: VectorLayerData, b: VectorLayerData): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function cloneDocumentSnapshot(doc: PaintDocument): PaintDocument {
@@ -624,6 +664,10 @@ export interface AppState {
   placeTextAt: (x: number, y: number, text: string) => void;
   createTextLayerAt: (x: number, y: number, text: string) => void;
   updateActiveTextLayer: (patch: Partial<TextLayerData>) => void;
+  addShapeLayer: (data?: Partial<ShapeData>) => void;
+  addVectorLayer: (data?: Partial<VectorLayerData>) => void;
+  updateActiveShapeLayer: (patch: Partial<ShapeData>) => void;
+  updateActiveVectorLayer: (patch: Partial<VectorLayerData>) => void;
 
   // selection
   setSelection: (sel: Selection | null) => void;
@@ -666,7 +710,13 @@ export interface AppState {
   undo: () => void;
   redo: () => void;
   /** record an externally-applied edit (tools/io) for undo */
-  commitEdit: (label: string, layerId: LayerId, before: Uint8ClampedArray, beforeTextData?: TextLayerData) => void;
+  commitEdit: (
+    label: string,
+    layerId: LayerId,
+    before: Uint8ClampedArray,
+    beforeTextData?: TextLayerData,
+    beforeData?: LayerEditDataSnapshot,
+  ) => void;
   bump: () => void;
 }
 
@@ -1204,6 +1254,106 @@ export const useStore = create<AppState>((set, get) => ({
     set({ doc: { ...doc, layers } });
     get().commitEdit('テキスト編集', layer.id, beforePixels, beforeTextData);
   },
+  addShapeLayer: (data) => {
+    const { doc } = get();
+    const shapeData = createShapeData(data);
+    const layer = createShapeLayer(doc.width, doc.height, shapeData, 'シェイプ');
+    const activeIndex = doc.activeLayerId ? layerIndex(doc, doc.activeLayerId) : -1;
+    const insertAt = activeIndex >= 0 ? activeIndex + 1 : doc.layers.length;
+    const layers = [...doc.layers];
+    layers.splice(insertAt, 0, layer);
+    const previousActiveLayerId = doc.activeLayerId;
+
+    set({ doc: { ...doc, layers, activeLayerId: layer.id }, rev: get().rev + 1 });
+    history.push({
+      label: 'シェイプレイヤー作成',
+      undo: () => {
+        const currentDoc = get().doc;
+        set({
+          doc: {
+            ...currentDoc,
+            layers: currentDoc.layers.filter((item) => item.id !== layer.id),
+            activeLayerId: previousActiveLayerId,
+          },
+        });
+      },
+      redo: () => {
+        const currentDoc = get().doc;
+        const nextLayers = [...currentDoc.layers];
+        const nextIndex = Math.min(insertAt, nextLayers.length);
+        nextLayers.splice(nextIndex, 0, layer);
+        set({ doc: { ...currentDoc, layers: nextLayers, activeLayerId: layer.id } });
+      },
+    });
+    set({ canUndo: history.canUndo(), canRedo: history.canRedo() });
+  },
+  addVectorLayer: (data) => {
+    const { doc } = get();
+    const vectorData = createVectorLayerData(data);
+    const layer = createVectorLayer(doc.width, doc.height, vectorData, 'ベクター');
+    const activeIndex = doc.activeLayerId ? layerIndex(doc, doc.activeLayerId) : -1;
+    const insertAt = activeIndex >= 0 ? activeIndex + 1 : doc.layers.length;
+    const layers = [...doc.layers];
+    layers.splice(insertAt, 0, layer);
+    const previousActiveLayerId = doc.activeLayerId;
+
+    set({ doc: { ...doc, layers, activeLayerId: layer.id }, rev: get().rev + 1 });
+    history.push({
+      label: 'ベクターレイヤー作成',
+      undo: () => {
+        const currentDoc = get().doc;
+        set({
+          doc: {
+            ...currentDoc,
+            layers: currentDoc.layers.filter((item) => item.id !== layer.id),
+            activeLayerId: previousActiveLayerId,
+          },
+        });
+      },
+      redo: () => {
+        const currentDoc = get().doc;
+        const nextLayers = [...currentDoc.layers];
+        const nextIndex = Math.min(insertAt, nextLayers.length);
+        nextLayers.splice(nextIndex, 0, layer);
+        set({ doc: { ...currentDoc, layers: nextLayers, activeLayerId: layer.id } });
+      },
+    });
+    set({ canUndo: history.canUndo(), canRedo: history.canRedo() });
+  },
+  updateActiveShapeLayer: (patch) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || !layer.shapeData) return;
+
+    const beforePixels = layer.pixels.slice();
+    const beforeShapeData = cloneShapeData(layer.shapeData);
+    const shapeData = updateShapeData(layer.shapeData, patch);
+    const pixels = rasterizeShape(shapeData, doc.width, doc.height);
+    if (shapeDataEquals(beforeShapeData, shapeData) && pixelsEqual(beforePixels, pixels)) return;
+
+    const layers = doc.layers.map((item) => (
+      item.id === layer.id ? { ...item, shapeData, pixels } : item
+    ));
+    set({ doc: { ...doc, layers } });
+    get().commitEdit('シェイプ編集', layer.id, beforePixels, undefined, { shapeData: beforeShapeData });
+  },
+  updateActiveVectorLayer: (patch) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || !layer.vectorData) return;
+
+    const beforePixels = layer.pixels.slice();
+    const beforeVectorData = cloneVectorLayerData(layer.vectorData);
+    const vectorData = updateVectorLayerData(layer.vectorData, patch);
+    const pixels = rasterizeVectorLayer(vectorData, doc.width, doc.height);
+    if (vectorLayerDataEquals(beforeVectorData, vectorData) && pixelsEqual(beforePixels, pixels)) return;
+
+    const layers = doc.layers.map((item) => (
+      item.id === layer.id ? { ...item, vectorData, pixels } : item
+    ));
+    set({ doc: { ...doc, layers } });
+    get().commitEdit('ベクター編集', layer.id, beforePixels, undefined, { vectorData: beforeVectorData });
+  },
 
   setSelection: (sel) => set({ doc: { ...get().doc, selection: sel }, rev: get().rev + 1 }),
   selectRect: (bounds) => {
@@ -1717,12 +1867,16 @@ export const useStore = create<AppState>((set, get) => ({
     history.redo();
     set({ rev: get().rev + 1, canUndo: history.canUndo(), canRedo: history.canRedo() });
   },
-  commitEdit: (label, layerId, before, beforeTextData) => {
+  commitEdit: (label, layerId, before, beforeTextData, beforeData) => {
     const afterLayer = findLayer(get().doc, layerId);
     const after = afterLayer?.pixels?.slice();
     if (!after) return;
     const afterTextData = beforeTextData && afterLayer?.textData ? cloneTextLayerData(afterLayer.textData) : undefined;
-    if (beforeTextData && afterTextData) {
+    const beforeShapeData = beforeData?.shapeData;
+    const afterShapeData = beforeShapeData && afterLayer?.shapeData ? cloneShapeData(afterLayer.shapeData) : undefined;
+    const beforeVectorData = beforeData?.vectorData;
+    const afterVectorData = beforeVectorData && afterLayer?.vectorData ? cloneVectorLayerData(afterLayer.vectorData) : undefined;
+    if (beforeTextData && afterTextData && !beforeShapeData && !beforeVectorData) {
       history.push({
         label,
         undo: () => {
@@ -1737,6 +1891,38 @@ export const useStore = create<AppState>((set, get) => ({
           const layers = currentDoc.layers.map((item) => (
             item.id === layerId ? { ...item, pixels: after.slice(), textData: cloneTextLayerData(afterTextData) } : item
           ));
+          set({ doc: { ...currentDoc, layers } });
+        },
+      });
+    } else if (
+      (beforeTextData && afterTextData)
+      || (beforeShapeData && afterShapeData)
+      || (beforeVectorData && afterVectorData)
+    ) {
+      history.push({
+        label,
+        undo: () => {
+          const currentDoc = get().doc;
+          const layers = currentDoc.layers.map((item) => {
+            if (item.id !== layerId) return item;
+            const nextLayer = { ...item, pixels: before.slice() };
+            if (beforeTextData && afterTextData) nextLayer.textData = cloneTextLayerData(beforeTextData);
+            if (beforeShapeData && afterShapeData) nextLayer.shapeData = cloneShapeData(beforeShapeData);
+            if (beforeVectorData && afterVectorData) nextLayer.vectorData = cloneVectorLayerData(beforeVectorData);
+            return nextLayer;
+          });
+          set({ doc: { ...currentDoc, layers } });
+        },
+        redo: () => {
+          const currentDoc = get().doc;
+          const layers = currentDoc.layers.map((item) => {
+            if (item.id !== layerId) return item;
+            const nextLayer = { ...item, pixels: after.slice() };
+            if (beforeTextData && afterTextData) nextLayer.textData = cloneTextLayerData(afterTextData);
+            if (beforeShapeData && afterShapeData) nextLayer.shapeData = cloneShapeData(afterShapeData);
+            if (beforeVectorData && afterVectorData) nextLayer.vectorData = cloneVectorLayerData(afterVectorData);
+            return nextLayer;
+          });
           set({ doc: { ...currentDoc, layers } });
         },
       });

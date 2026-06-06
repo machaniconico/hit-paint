@@ -6,6 +6,8 @@
  */
 
 import type { TextLayerData } from '../text/text-layer';
+import type { ShapeData } from '../vector/shape';
+import type { VectorLayerData } from '../vector/vector-layer';
 
 // ---------------------------------------------------------------------------
 // Color
@@ -91,6 +93,10 @@ export interface Layer {
   pixels?: Uint8ClampedArray;
   /** これを持つ raster レイヤーは textData から pixels を再生成できる再編集テキストレイヤー。 */
   textData?: TextLayerData;
+  /** これを持つ raster レイヤーは vectorData から pixels を再生成できる再編集ベクターレイヤー。 */
+  vectorData?: VectorLayerData;
+  /** これを持つ raster レイヤーは shapeData から pixels を再生成できる再編集シェイプレイヤー。 */
+  shapeData?: ShapeData;
   /** Non-destructive filter applied by kind==='adjustment'. */
   adjustment?: AdjustmentSpec;
   /** 8-bit visibility mask, length = width*height (0 = hide, 255 = show). */
@@ -179,6 +185,7 @@ export type ToolId =
   | 'gradient'
   | 'pen'
   | 'text'
+  | 'shape'
   | 'eyedropper'
   | 'liquify'
   | 'select-rect'
