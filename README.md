@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (386 tests)
+npm test           # vitest (410 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -63,8 +63,12 @@ npm run typecheck  # tsc --noEmit
   特定色の置換(`filters/replace-color`、tolerance/fuzziness で柔らか境界)。フィルターメニュー配線済み。
 - **液状化 / レンズ / ビネット** — 液状化ツール(`tools/liquify` の push/bloat/pinch、ツールバー配線済み)、
   レンズ歪み(`filters/lens` の樽型/糸巻き型)、周辺減光ビネット(`filters/vignette`、着色対応)。
-  ヒストグラム等化・ガンマ・モーション/放射ブラーもフィルターメニューに配線済み。
+  ヒストグラム等化・ガンマ・モーション/放射ブラー・レンズ歪み・ビネットもフィルターメニューに配線済み。
 - **ベクターパス** — 三次ベジェのパス平坦化と塗り/ストロークのラスタライズ(`vector/path`)。
+  複合パス塗り(`rasterizeFillCompound`、evenodd/nonzero 巻き数規則で穴あき図形に対応)と
+  破線ストローク(`rasterizeDashedStroke`、弧長ベースの dash パターン)もサポート。
+- **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
+  ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
   nearest/bilinear リサンプル(`tools/resample`)、繰り返しタイル塗りとシームレス化(`tools/pattern`)。
 - **ペンツール / 液状化 / トーン** — ベジェのペンツール(`tools`+`vector/path`、塗り/線で確定・選択尊重・Undo)、
