@@ -105,6 +105,7 @@ export function App() {
   const s = useStore();
   const [blurRadius, setBlurRadius] = useState(4);
   const [mosaicBlockSize, setMosaicBlockSize] = useState(4);
+  const [quantizeMaxColors, setQuantizeMaxColors] = useState(16);
   const [canvasW, setCanvasW] = useState(s.doc.width);
   const [canvasH, setCanvasH] = useState(s.doc.height);
   const [resizeFromCenter, setResizeFromCenter] = useState(false);
@@ -419,6 +420,10 @@ export function App() {
               <input type="range" min={2} max={32} value={mosaicBlockSize}
                 onChange={(e) => setMosaicBlockSize(+e.target.value)} />
             </label>
+            <label>減色数 <b>{quantizeMaxColors}</b>
+              <input type="range" min={2} max={64} value={quantizeMaxColors}
+                onChange={(e) => setQuantizeMaxColors(+e.target.value)} />
+            </label>
             <div className="filter-grid">
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('blur', { radius: blurRadius })}>ぼかし</button>
@@ -450,6 +455,8 @@ export function App() {
                 onClick={() => s.applyFilter('mosaic', { blockSize: mosaicBlockSize })}>モザイク</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('ordered-dither', { levels: 4 })}>ディザ</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('quantize', { maxColors: quantizeMaxColors })}>減色</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('color-balance', { midtones: [8, 0, -8] })}>
                 カラーバランス

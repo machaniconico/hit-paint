@@ -50,6 +50,7 @@ import { applyCurves, type CurvesOptions } from '../filters/curves';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
 import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
+import { applyQuantize } from '../filters/quantize';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import {
@@ -90,6 +91,7 @@ export interface FilterOptionMap {
   'color-balance': Partial<Maskless<ColorBalanceOptions>>;
   'gradient-map': Partial<Maskless<GradientMapOptions>>;
   curves: Partial<Maskless<CurvesOptions>>;
+  quantize: { maxColors: number };
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -1266,6 +1268,11 @@ export const useStore = create<AppState>((set, get) => ({
           levels: filterOpts?.levels ?? 4,
           mask: selectionMask,
         });
+        break;
+      }
+      case 'quantize': {
+        const filterOpts = opts as FilterOptionMap['quantize'] | undefined;
+        applyQuantize(layer.pixels, doc.width, doc.height, filterOpts?.maxColors ?? 16, selectionMask);
         break;
       }
       case 'color-balance': {
