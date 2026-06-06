@@ -193,7 +193,8 @@ export function Canvas() {
       case 'eyedropper': pickColorAt(s.x, s.y); break;
       case 'fill': floodFillAt(s.x, s.y); break;
       case 'brush':
-      case 'eraser': beginStroke(s); break;
+      case 'eraser':
+      case 'liquify': beginStroke(s); break;
       case 'move':
       case 'transform': gesture.current = { type: 'move', startX: s.x, startY: s.y, lastX: s.x, lastY: s.y }; break;
       case 'select-rect': gesture.current = { type: 'rect', startX: s.x, startY: s.y, lastX: s.x, lastY: s.y }; break;

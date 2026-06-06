@@ -79,10 +79,10 @@ body {
 .harmony-grid { grid-template-columns: repeat(4, 1fr); margin-top: 8px; }
 .mini { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; padding: 0 6px; }
 .mini:disabled { opacity: 0.45; cursor: default; }
-.filter-grid, .selection-grid, .adjustment-grid, .transform-grid, .align-grid, .effect-kind-grid, .layer-effect-grid, .pen-actions {
+.filter-grid, .selection-grid, .adjustment-grid, .transform-grid, .align-grid, .effect-kind-grid, .liquify-mode-grid, .layer-effect-grid, .pen-actions {
   display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
 }
-.filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini, .transform-grid .mini, .align-grid .mini, .effect-kind-grid .mini, .layer-effect-grid .mini, .pen-actions .mini {
+.filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini, .transform-grid .mini, .align-grid .mini, .effect-kind-grid .mini, .liquify-mode-grid .mini, .layer-effect-grid .mini, .pen-actions .mini {
   min-height: 28px; padding: 4px 6px;
 }
 .filter-grid .wide { grid-column: 1 / -1; }
@@ -93,7 +93,8 @@ body {
 .transform-grid .wide { grid-column: 1 / -1; }
 .adjustment-grid { grid-template-columns: 1fr; }
 .effect-kind-grid { margin-top: 8px; }
-.effect-kind-grid .active { border-color: var(--accent); background: #2f4055; }
+.liquify-mode-grid { grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
+.effect-kind-grid .active, .liquify-mode-grid .active { border-color: var(--accent); background: #2f4055; }
 .pen-panel label b { color: var(--accent); font-weight: 600; }
 .layer-effects { margin: 8px 0; }
 .layer-effects h4 { font-size: 12px; margin: 0 0 6px; }

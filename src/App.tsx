@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore, type LayerEffectKind } from './state/store';
+import { useStore, type LayerEffectKind, type LiquifyMode } from './state/store';
 import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
 import type { AdjustmentSpec, BlendMode, ToolId } from './types';
@@ -28,6 +28,7 @@ const TOOLS: { id: ToolId; label: string; key: string }[] = [
   { id: 'pen', label: 'ペン', key: 'P' },
   { id: 'text', label: 'テキスト', key: 'T' },
   { id: 'eyedropper', label: 'スポイト', key: 'I' },
+  { id: 'liquify', label: '液状化', key: 'L' },
   { id: 'select-rect', label: '矩形選択', key: 'M' },
   { id: 'select-ellipse', label: '楕円選択', key: 'Shift+M' },
   { id: 'move', label: '移動', key: 'V' },
@@ -48,6 +49,12 @@ const EFFECT_BRUSH_KINDS: { kind: EffectBrushKind; label: string }[] = [
   { kind: 'sharpen', label: 'シャープ' },
   { kind: 'dodge', label: '覆い焼き' },
   { kind: 'burn', label: '焼き込み' },
+];
+
+const LIQUIFY_MODES: { mode: LiquifyMode; label: string }[] = [
+  { mode: 'push', label: '押す' },
+  { mode: 'bloat', label: '膨張' },
+  { mode: 'pinch', label: '収縮' },
 ];
 
 const ADJUSTMENT_TYPES: { type: AdjustmentSpec['type']; label: string; opts?: Record<string, number> }[] = [
@@ -500,6 +507,15 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('sharpen', { amount: 0.75 })}>シャープ</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('unsharp', { amount: 1, radius: 1 })}>アンシャープ</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('replace-color', {
+                  from: s.primary,
+                  to: s.secondary,
+                  tolerance: s.fillTolerance,
+                  fuzziness: 16,
+                })}>色置換</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('threshold', { level: 128 })}>しきい値</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('posterize', { levels: 4 })}>ポスタライズ</button>
@@ -596,6 +612,19 @@ export function App() {
 
           <section className="panel tool-actions">
             <h3>ツール実行</h3>
+            {s.tool === 'liquify' && (
+              <div className="liquify-mode-grid" aria-label="液状化モード">
+                {LIQUIFY_MODES.map((item) => (
+                  <button
+                    key={item.mode}
+                    className={s.liquifyMode === item.mode ? 'mini active' : 'mini'}
+                    onClick={() => s.setLiquifyMode(item.mode)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <button className="mini wide" disabled={!canFilterActive}
               onClick={() => s.applyGradient(0, 0, Math.max(1, s.doc.width - 1), 0)}>
               横グラデーション

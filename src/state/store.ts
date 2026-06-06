@@ -14,6 +14,7 @@ import { History, pixelSnapshotCommand } from '../core/history';
 import { BLACK, WHITE } from '../color/color';
 import { floodFill, fillRegion } from '../tools/fill';
 import { fillLinearGradient } from '../tools/gradient';
+import { bloatDab, pinchDab, pushDab } from '../tools/liquify';
 import { ellipseMask, rectMask } from '../tools/marquee';
 import { selectionMaskFromColor } from '../tools/magic-wand';
 import { paintMaskDab } from '../tools/mask-paint';
@@ -53,7 +54,9 @@ import { motionBlur, type MotionBlurOptions, zoomBlur, type ZoomBlurOptions } fr
 import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
 import { applyQuantize } from '../filters/quantize';
+import { replaceColor } from '../filters/replace-color';
 import { adjustGamma, equalizeHistogram } from '../filters/tone';
+import { unsharpMask } from '../filters/unsharp';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import {
@@ -74,6 +77,7 @@ import {
 } from '../core/layer-effects';
 
 type Maskless<T> = Omit<T, 'mask'>;
+export type LiquifyMode = 'push' | 'bloat' | 'pinch';
 
 export interface FilterOptionMap {
   blur: Partial<GaussianBlurOptions>;
@@ -83,6 +87,7 @@ export interface FilterOptionMap {
   'hue-saturation': Partial<HueSaturationOptions>;
   levels: Partial<LevelsOptions>;
   sharpen: Partial<SharpenOptions>;
+  unsharp: { amount: number; radius: number; threshold?: number };
   threshold: Partial<ThresholdOptions>;
   posterize: Partial<PosterizeOptions>;
   sepia: Record<string, never>;
@@ -100,6 +105,7 @@ export interface FilterOptionMap {
   gamma: { gamma: number };
   'motion-blur': MotionBlurOptions;
   'zoom-blur': Pick<ZoomBlurOptions, 'strength'>;
+  'replace-color': { from: RGBA; to: RGBA; tolerance: number; fuzziness?: number };
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -121,7 +127,14 @@ interface StrokeContext {
   before: Uint8ClampedArray; // snapshot for undo
   color: RGBA;
 }
+interface LiquifyStrokeContext {
+  layerId: LayerId;
+  before: Uint8ClampedArray;
+  lastX: number;
+  lastY: number;
+}
 let activeStroke: StrokeContext | null = null;
+let activeLiquifyStroke: LiquifyStrokeContext | null = null;
 let activeMaskStroke: LayerId | null = null;
 let animFrameCounter = 0;
 export const getActiveStroke = () => activeStroke;
@@ -542,6 +555,7 @@ export interface AppState {
   dynamics: DynamicsConfig;
   primary: RGBA;
   secondary: RGBA;
+  liquifyMode: LiquifyMode;
   swatches: RGBA[];
   /** 0..255 color match tolerance for the fill tool */
   fillTolerance: number;
@@ -569,6 +583,7 @@ export interface AppState {
   setDynamics: (patch: Partial<DynamicsConfig>) => void;
   setPrimary: (c: RGBA) => void;
   setSecondary: (c: RGBA) => void;
+  setLiquifyMode: (mode: LiquifyMode) => void;
   swapColors: () => void;
   addSwatchAction: () => void;
   removeSwatchAction: (index: number) => void;
@@ -585,6 +600,7 @@ export interface AppState {
   extendStroke: (s: PointerSample) => void;
   endStroke: () => void;
   paintActiveLayerMaskDab: (x: number, y: number) => void;
+  liquifyDab: (x: number, y: number, dx?: number, dy?: number) => void;
   pickColorAt: (x: number, y: number) => void;
   setFillTolerance: (n: number) => void;
   floodFillAt: (x: number, y: number) => void;
@@ -657,6 +673,7 @@ export const useStore = create<AppState>((set, get) => ({
   dynamics: defaultDynamics(),
   primary: { ...BLACK },
   secondary: { ...WHITE },
+  liquifyMode: 'push',
   swatches: [],
   fillTolerance: 32,
   rev: 0,
@@ -669,6 +686,7 @@ export const useStore = create<AppState>((set, get) => ({
   newDocument: (w = 1280, h = 720, name = '無題') => {
     history.clear();
     activeStroke = null;
+    activeLiquifyStroke = null;
     activeMaskStroke = null;
     const doc = createDocument(w, h, name);
     set({
@@ -686,6 +704,7 @@ export const useStore = create<AppState>((set, get) => ({
   loadDocument: (doc) => {
     history.clear();
     activeStroke = null;
+    activeLiquifyStroke = null;
     activeMaskStroke = null;
     set({
       doc,
@@ -759,6 +778,7 @@ export const useStore = create<AppState>((set, get) => ({
   setDynamics: (patch) => set({ dynamics: { ...get().dynamics, ...patch } }),
   setPrimary: (c) => set({ primary: c }),
   setSecondary: (c) => set({ secondary: c }),
+  setLiquifyMode: (mode) => set({ liquifyMode: mode }),
   swapColors: () => set({ primary: get().secondary, secondary: get().primary }),
   addSwatchAction: () => set({ swatches: addSwatch(get().swatches, get().primary) }),
   removeSwatchAction: (index) => set({ swatches: removeSwatch(get().swatches, index) }),
@@ -786,6 +806,17 @@ export const useStore = create<AppState>((set, get) => ({
       set({ isStroking: true });
       return;
     }
+    if (tool === 'liquify') {
+      activeLiquifyStroke = {
+        layerId: layer.id,
+        before: layer.pixels.slice(),
+        lastX: s.x,
+        lastY: s.y,
+      };
+      get().liquifyDab(s.x, s.y, 0, 0);
+      set({ isStroking: true });
+      return;
+    }
     const erase = tool === 'eraser';
     const engine = new StoreStrokeEngine(
       doc.width,
@@ -809,6 +840,14 @@ export const useStore = create<AppState>((set, get) => ({
       get().paintActiveLayerMaskDab(s.x, s.y);
       return;
     }
+    if (activeLiquifyStroke) {
+      const dx = s.x - activeLiquifyStroke.lastX;
+      const dy = s.y - activeLiquifyStroke.lastY;
+      activeLiquifyStroke.lastX = s.x;
+      activeLiquifyStroke.lastY = s.y;
+      get().liquifyDab(s.x, s.y, dx, dy);
+      return;
+    }
     if (!activeStroke) return;
     activeStroke.engine.addSample(s);
     set({ rev: get().rev + 1 });
@@ -817,6 +856,18 @@ export const useStore = create<AppState>((set, get) => ({
     if (activeMaskStroke) {
       activeMaskStroke = null;
       set({ isStroking: false, canUndo: history.canUndo(), canRedo: history.canRedo() });
+      return;
+    }
+    if (activeLiquifyStroke) {
+      const st = activeLiquifyStroke;
+      activeLiquifyStroke = null;
+      const layer = findLayer(get().doc, st.layerId);
+      if (layer?.pixels && !pixelsEqual(st.before, layer.pixels)) {
+        set({ isStroking: false });
+        get().commitEdit('液状化', st.layerId, st.before);
+      } else {
+        set({ isStroking: false, canUndo: history.canUndo(), canRedo: history.canRedo() });
+      }
       return;
     }
     const st = activeStroke;
@@ -874,6 +925,55 @@ export const useStore = create<AppState>((set, get) => ({
       },
     });
     set({ canUndo: history.canUndo(), canRedo: history.canRedo() });
+  },
+  liquifyDab: (x, y, dx, dy) => {
+    const { doc, brush, liquifyMode } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked || !layer.visible) return;
+
+    const before = layer.pixels.slice();
+    const radius = Math.max(0.5, brush.size / 2);
+    const strength = Math.max(0, Math.min(1, brush.opacity * brush.flow));
+
+    switch (liquifyMode) {
+      case 'push':
+        pushDab(layer.pixels, doc.width, doc.height, {
+          x,
+          y,
+          radius,
+          dx: dx ?? 0,
+          dy: dy ?? 0,
+          strength,
+        });
+        break;
+      case 'bloat':
+        bloatDab(layer.pixels, doc.width, doc.height, { x, y, radius, strength });
+        break;
+      case 'pinch':
+        pinchDab(layer.pixels, doc.width, doc.height, { x, y, radius, strength });
+        break;
+    }
+
+    if (doc.selection) {
+      for (let pi = 0; pi < doc.selection.mask.length; pi += 1) {
+        const coverage = doc.selection.mask[pi] / 255;
+        if (coverage >= 1) continue;
+        const o = pi * 4;
+        if (coverage <= 0) {
+          layer.pixels[o] = before[o];
+          layer.pixels[o + 1] = before[o + 1];
+          layer.pixels[o + 2] = before[o + 2];
+          layer.pixels[o + 3] = before[o + 3];
+        } else {
+          layer.pixels[o] = before[o] + (layer.pixels[o] - before[o]) * coverage;
+          layer.pixels[o + 1] = before[o + 1] + (layer.pixels[o + 1] - before[o + 1]) * coverage;
+          layer.pixels[o + 2] = before[o + 2] + (layer.pixels[o + 2] - before[o + 2]) * coverage;
+          layer.pixels[o + 3] = before[o + 3] + (layer.pixels[o + 3] - before[o + 3]) * coverage;
+        }
+      }
+    }
+
+    set({ rev: get().rev + 1 });
   },
   pickColorAt: (x, y) => {
     const { doc } = get();
@@ -1421,6 +1521,15 @@ export const useStore = create<AppState>((set, get) => ({
         sharpen(layer.pixels, doc.width, doc.height, { amount: filterOpts?.amount ?? 0.75 }, selectionMask);
         break;
       }
+      case 'unsharp': {
+        const filterOpts = opts as FilterOptionMap['unsharp'] | undefined;
+        unsharpMask(layer.pixels, doc.width, doc.height, {
+          amount: filterOpts?.amount ?? 1,
+          radius: filterOpts?.radius ?? 1,
+          threshold: filterOpts?.threshold,
+        }, selectionMask);
+        break;
+      }
       case 'threshold': {
         const filterOpts = opts as Partial<ThresholdOptions> | undefined;
         threshold(layer.pixels, doc.width, doc.height, { level: filterOpts?.level ?? 128 }, selectionMask);
@@ -1537,6 +1646,16 @@ export const useStore = create<AppState>((set, get) => ({
           cx: (doc.width - 1) / 2,
           cy: (doc.height - 1) / 2,
           strength: filterOpts?.strength ?? 0.35,
+        }, selectionMask);
+        break;
+      }
+      case 'replace-color': {
+        const filterOpts = opts as FilterOptionMap['replace-color'] | undefined;
+        replaceColor(layer.pixels, doc.width, doc.height, {
+          from: filterOpts?.from ?? get().primary,
+          to: filterOpts?.to ?? get().secondary,
+          tolerance: filterOpts?.tolerance ?? get().fillTolerance,
+          fuzziness: filterOpts?.fuzziness,
         }, selectionMask);
         break;
       }

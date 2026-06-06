@@ -180,6 +180,7 @@ export type ToolId =
   | 'pen'
   | 'text'
   | 'eyedropper'
+  | 'liquify'
   | 'select-rect'
   | 'select-ellipse'
   | 'select-lasso'
