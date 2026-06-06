@@ -62,6 +62,7 @@ import { clarity, type ClarityOptions } from '../filters/clarity';
 import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type GradientMapOptions } from '../filters/color-balance';
 import { emboss, sobelEdge } from '../filters/convolve';
 import { applyCurves, type CurvesOptions } from '../filters/curves';
+import { dehaze, type DehazeOptions } from '../filters/dehaze';
 import { duotone, type DuotoneOptions } from '../filters/duotone';
 import { gaussianBlur, type GaussianBlurOptions } from '../filters/gaussian';
 import { halftone, type HalftoneOptions } from '../filters/halftone';
@@ -83,6 +84,7 @@ import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import { worleyField, worleyToGrayscale } from '../engine/cellular';
 import { generateNoiseField, noiseToGrayscale } from '../engine/perlin';
+import { cloneStampDab, type CloneStampOptions } from '../tools/clone-stamp';
 import { createMeshGrid, meshWarp, type MeshGrid } from '../tools/mesh-warp';
 import { perspectiveWarp, type Quad } from '../tools/perspective';
 import {
@@ -156,6 +158,7 @@ export interface FilterOptionMap {
   halftone: HalftoneOptions;
   chromatic: ChromaticOptions;
   oil: OilPaintOptions;
+  dehaze: DehazeOptions;
   duotone: StoreDuotoneOptions;
   chromakey: ChromaKeyOptions;
 }
@@ -650,6 +653,8 @@ export interface AppState {
   swatches: RGBA[];
   /** 0..255 color match tolerance for the fill tool */
   fillTolerance: number;
+  cloneSourceX: number | null;
+  cloneSourceY: number | null;
   /** bump to force canvas redraw after in-place pixel mutation */
   rev: number;
   isStroking: boolean;
@@ -705,6 +710,8 @@ export interface AppState {
   commitPenPath: (mode: 'fill' | 'stroke', width?: number) => void;
   cancelPenPath: () => void;
   effectBrushDab: (kind: 'blur' | 'sharpen' | 'dodge' | 'burn', x: number, y: number) => void;
+  setCloneSource: (x: number, y: number) => void;
+  applyCloneStamp: (dstX: number, dstY: number, radius?: number) => void;
   moveActiveLayer: (dx: number, dy: number) => void;
   placeTextAt: (x: number, y: number, text: string) => void;
   createTextLayerAt: (x: number, y: number, text: string) => void;
@@ -787,6 +794,8 @@ export const useStore = create<AppState>((set, get) => ({
   liquifyMode: 'push',
   swatches: [],
   fillTolerance: 32,
+  cloneSourceX: null,
+  cloneSourceY: null,
   rev: 0,
   isStroking: false,
   canUndo: false,
@@ -809,6 +818,8 @@ export const useStore = create<AppState>((set, get) => ({
       isStroking: false,
       canUndo: false,
       canRedo: false,
+      cloneSourceX: null,
+      cloneSourceY: null,
       penPath: null,
     });
   },
@@ -826,6 +837,8 @@ export const useStore = create<AppState>((set, get) => ({
       isStroking: false,
       canUndo: false,
       canRedo: false,
+      cloneSourceX: null,
+      cloneSourceY: null,
       penPath: null,
     });
   },
@@ -1234,6 +1247,30 @@ export const useStore = create<AppState>((set, get) => ({
 
     if (!pixelsEqual(before, layer.pixels)) {
       get().commitEdit('効果ブラシ', layer.id, before);
+    }
+  },
+  setCloneSource: (x, y) => {
+    set({ cloneSourceX: x, cloneSourceY: y });
+  },
+  applyCloneStamp: (dstX, dstY, radius) => {
+    const { doc, cloneSourceX, cloneSourceY } = get();
+    if (cloneSourceX === null || cloneSourceY === null) return;
+
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked || !layer.visible) return;
+
+    const before = layer.pixels.slice();
+    const opts: CloneStampOptions = {
+      srcX: cloneSourceX,
+      srcY: cloneSourceY,
+      dstX,
+      dstY,
+      radius: radius ?? 20,
+    };
+    cloneStampDab(layer.pixels, doc.width, doc.height, opts);
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('クローン', layer.id, before);
     }
   },
   moveActiveLayer: (dx, dy) => {
@@ -2072,6 +2109,15 @@ export const useStore = create<AppState>((set, get) => ({
           radius: 3,
           ...filterOpts,
           mask: selectionMask ?? undefined,
+        });
+        break;
+      }
+      case 'dehaze': {
+        const filterOpts = opts as FilterOptionMap['dehaze'] | undefined;
+        dehaze(layer.pixels, doc.width, doc.height, {
+          strength: 0.6,
+          ...filterOpts,
+          mask: selectionMask,
         });
         break;
       }

@@ -615,6 +615,8 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('oil', { radius: 3 })}>油彩</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('dehaze', { strength: 0.6 })}>除霧</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('brightness-contrast', { brightness: 10, contrast: 10 })}>
                 明るさ・コントラスト
               </button>
@@ -717,6 +719,22 @@ export function App() {
                   ],
                 })}>
                 トーンカーブ
+              </button>
+            </div>
+            <div className="filter-grid">
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => {
+                  const point = centerPoint();
+                  s.setCloneSource(point.x, point.y);
+                }}>
+                クローン元設定
+              </button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => {
+                  const point = centerPoint();
+                  s.applyCloneStamp(point.x + 48, point.y, 20);
+                }}>
+                クローン実行(デモ)
               </button>
             </div>
           </section>

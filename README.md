@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (636 tests)
+npm test           # vitest (662 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -89,6 +89,8 @@ npm run typecheck  # tsc --noEmit
   画像からの代表色スウォッチ抽出(`color/swatches`)、ラジアル対称の万華鏡マッピング(`tools/kaleidoscope`)。
 - **スプライトシート / 除霧 / クローンスタンプ** — アニメフレームの格子合成スプライトシート(`anim/sprite-sheet`)、
   dark channel prior による除霧(`filters/dehaze`)、領域複製のクローンスタンプ(`tools/clone-stamp`、フォールオフ/不透明度)。
+- **ガイド / セレクティブカラー / テクスチャブラシ** — ガイド・グリッド・スナップ(`core/guides`)、
+  色域別 HSL 調整のセレクティブカラー(`filters/selective-color`)、テクスチャ/散布ブラシ先端生成(`engine/brush-texture`)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
