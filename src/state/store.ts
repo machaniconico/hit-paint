@@ -53,6 +53,7 @@ import {
   type ThresholdOptions,
 } from '../filters';
 import { bloom, type BloomOptions } from '../filters/bloom';
+import { adaptiveThreshold, type AdaptiveThresholdOptions } from '../filters/adaptive-threshold';
 import { channelMixer, type ChannelMixerOptions } from '../filters/channel-mixer';
 import { chromaticAberration, type ChromaticOptions } from '../filters/chromatic';
 import { chromaKey, type ChromaKeyOptions } from '../filters/chromakey';
@@ -71,6 +72,7 @@ import { oilPaint, type OilPaintOptions } from '../filters/oil';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
 import { applyQuantize } from '../filters/quantize';
 import { replaceColor } from '../filters/replace-color';
+import { pencilSketch, type SketchOptions } from '../filters/sketch';
 import { adjustGamma, equalizeHistogram } from '../filters/tone';
 import { unsharpMask } from '../filters/unsharp';
 import { vignette, type VignetteOptions } from '../filters/vignette';
@@ -78,6 +80,7 @@ import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import { worleyField, worleyToGrayscale } from '../engine/cellular';
 import { generateNoiseField, noiseToGrayscale } from '../engine/perlin';
+import { createMeshGrid, meshWarp, type MeshGrid } from '../tools/mesh-warp';
 import { perspectiveWarp, type Quad } from '../tools/perspective';
 import {
   addSwatch,
@@ -120,6 +123,8 @@ export interface FilterOptionMap {
   sharpen: Partial<SharpenOptions>;
   unsharp: { amount: number; radius: number; threshold?: number };
   threshold: Partial<ThresholdOptions>;
+  sketch: SketchOptions;
+  'adaptive-threshold': AdaptiveThresholdOptions;
   posterize: Partial<PosterizeOptions>;
   sepia: Record<string, never>;
   'auto-levels': Partial<Maskless<AutoToneOptions>>;
@@ -724,6 +729,7 @@ export interface AppState {
   resizeCanvasTo: (w: number, h: number, anchor?: ResizeCanvasOptions['anchor']) => void;
   alignActiveLayer: (mode: AlignMode) => void;
   applyPerspective: (dst: Quad) => void;
+  applyMeshWarp: (grid: MeshGrid) => void;
   mergeDown: (id: LayerId) => void;
   addLayerMask: (id: LayerId) => void;
   removeLayerMask: (id: LayerId) => void;
@@ -1589,6 +1595,27 @@ export const useStore = create<AppState>((set, get) => ({
       set({ rev: get().rev + 1 });
     }
   },
+  applyMeshWarp: (grid) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const next = meshWarp(layer.pixels, doc.width, doc.height, grid);
+    if (next.length !== before.length) return;
+
+    const layerId = layer.id;
+    const layers = doc.layers.map((item) => (
+      item.id === layerId ? { ...item, pixels: next } : item
+    ));
+    set({ doc: { ...doc, layers } });
+
+    if (!pixelsEqual(before, next)) {
+      get().commitEdit('メッシュワープ', layerId, before);
+    } else {
+      set({ rev: get().rev + 1 });
+    }
+  },
   mergeDown: (id) => {
     const { doc } = get();
     const i = layerIndex(doc, id);
@@ -1791,6 +1818,24 @@ export const useStore = create<AppState>((set, get) => ({
       case 'threshold': {
         const filterOpts = opts as Partial<ThresholdOptions> | undefined;
         threshold(layer.pixels, doc.width, doc.height, { level: filterOpts?.level ?? 128 }, selectionMask);
+        break;
+      }
+      case 'sketch': {
+        const filterOpts = opts as FilterOptionMap['sketch'] | undefined;
+        pencilSketch(layer.pixels, doc.width, doc.height, {
+          blurRadius: filterOpts?.blurRadius ?? 6,
+          strength: filterOpts?.strength,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'adaptive-threshold': {
+        const filterOpts = opts as FilterOptionMap['adaptive-threshold'] | undefined;
+        adaptiveThreshold(layer.pixels, doc.width, doc.height, {
+          radius: filterOpts?.radius ?? 8,
+          bias: filterOpts?.bias,
+          mask: selectionMask,
+        });
         break;
       }
       case 'posterize': {

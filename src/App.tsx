@@ -12,6 +12,7 @@ import { importCLIP, exportCLIP } from './io/clip';
 import { exportPNG, importImageFile } from './io/png';
 import { pickFile, downloadBlob } from './io/files';
 import type { ShapeKind } from './vector/shape';
+import { createMeshGrid } from './tools/mesh-warp';
 
 function guessMime(name: string): string {
   if (name.endsWith('.png')) return 'image/png';
@@ -580,6 +581,10 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('threshold', { level: 128 })}>しきい値</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('sketch', { blurRadius: 6 })}>スケッチ</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('adaptive-threshold', { radius: 8 })}>適応しきい値</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('posterize', { levels: 4 })}>ポスタライズ</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('sepia')}>セピア</button>
@@ -752,6 +757,16 @@ export function App() {
                   x3: 0,
                   y3: s.doc.height,
                 })}>パース変形</button>
+              <button className="mini wide" disabled={!canTransformActive}
+                onClick={() => {
+                  const grid = createMeshGrid(s.doc.width, s.doc.height, 2, 2);
+                  const center = grid.points[4];
+                  if (center) {
+                    center.x = Math.min(s.doc.width, center.x + Math.max(1, Math.floor(s.doc.width / 16)));
+                    center.y = Math.max(0, center.y - Math.max(1, Math.floor(s.doc.height / 20)));
+                  }
+                  s.applyMeshWarp(grid);
+                }}>メッシュワープ(デモ)</button>
             </div>
           </section>
 

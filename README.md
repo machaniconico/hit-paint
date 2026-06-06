@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (572 tests)
+npm test           # vitest (595 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -83,6 +83,8 @@ npm run typecheck  # tsc --noEmit
   輝度→2色マッピングのデュオトーン(`filters/duotone`)、色距離でアルファを抜くクロマキー(`filters/chromakey`)。
 - **スケッチ / 適応しきい値 / メッシュワープ** — color dodge 法の鉛筆スケッチ(`filters/sketch`)、
   局所平均ベースの適応的2値化(`filters/adaptive-threshold`)、N×M 格子のメッシュワープ(`tools/mesh-warp`)。
+- **SVG書き出し / グラデ生成 / 自動WB** — shape/vector レイヤーの SVG エクスポート(`io/svg`)、
+  多段 linear/radial/conic グラデーション生成(`engine/gradient`)、gray-world 自動ホワイトバランス(`filters/white-balance`)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
