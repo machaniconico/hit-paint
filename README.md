@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (328 tests)
+npm test           # vitest (349 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -55,7 +55,10 @@ npm run typecheck  # tsc --noEmit
   ブラシダイナミクス(`engine/brush-dynamics` の決定論的サイズ/不透明度ジッター・散布)、
   カラーパレットと配色ハーモニー生成(`color/palette` の補色/類似色/トライアド/テトラード)。
 - **アニメーション** — コマ撮りフレームのタイムライン管理(`anim/timeline` の追加/複製/並べ替え)と
-  オニオンスキン合成(前後フレームを低不透明度で重ねる)。
+  オニオンスキン合成(前後フレームを低不透明度で重ねる)。store/UI 配線済み(フレーム追加・移動・
+  削除・オニオン切替、フレーム間で画素バッファ非共有)。
+- **色変換 / モーションブラー** — RGB↔HSL 変換と色温度・色合い調整(`color/convert`)、
+  方向性モーションブラーと放射(ズーム)ブラー(`filters/motion-blur`)。
 - **ベクターパス** — 三次ベジェのパス平坦化と塗り/ストロークのラスタライズ(`vector/path`)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
   nearest/bilinear リサンプル(`tools/resample`)、繰り返しタイル塗りとシームレス化(`tools/pattern`)。
@@ -107,8 +110,9 @@ src/
   vector/     path(ベジェ・パスのラスタライズ)
   anim/       timeline(フレーム・オニオンスキン)
   filters/    index(基本フィルター) / curves / color-balance / histogram /
-              convolve(エッジ/エンボス) / pixelate / noise / quantize(減色) / tone(等化・ガンマ)
-  color/      color(RGB<->HSV / hex) / palette(スウォッチ・配色ハーモニー)
+              convolve(エッジ/エンボス) / pixelate / noise / quantize(減色) /
+              tone(等化・ガンマ) / motion-blur(方向・放射ブラー)
+  color/      color(RGB<->HSV / hex) / convert(HSL・色温度) / palette(スウォッチ・配色ハーモニー)
   io/         psd / clip / png / files(DLとピッカー)
   state/      store(zustand 統合点)
   ui/         Canvas(描画+入力) / App(UIシェル)
