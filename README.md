@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (479 tests)
+npm test           # vitest (503 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -75,6 +75,8 @@ npm run typecheck  # tsc --noEmit
   高輝度部の発光ブルーム(`filters/bloom`)。チャンネルミキサー(`filters/channel-mixer`)と
   クラリティ(`filters/clarity`)もフィルターメニューに配線済み。
 - **パス簡略化 / 変換** — Douglas-Peucker 簡略化と AABB/平行移動/拡縮ユーティリティ(`vector/simplify`)。
+- **変位マップ / ハーフトーン / ノイズ** — R/G を変位に使う displacement map(`filters/displace`、bilinear)、
+  網点スクリーンのハーフトーン(`filters/halftone`)、決定論的な value noise/fbm 生成(`engine/perlin`)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
