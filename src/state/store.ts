@@ -54,6 +54,7 @@ import {
 } from '../filters';
 import { bloom, type BloomOptions } from '../filters/bloom';
 import { channelMixer, type ChannelMixerOptions } from '../filters/channel-mixer';
+import { chromaticAberration, type ChromaticOptions } from '../filters/chromatic';
 import { clarity, type ClarityOptions } from '../filters/clarity';
 import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type GradientMapOptions } from '../filters/color-balance';
 import { emboss, sobelEdge } from '../filters/convolve';
@@ -64,6 +65,7 @@ import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histo
 import { lensDistort, type LensDistortOptions } from '../filters/lens';
 import { motionBlur, type MotionBlurOptions, zoomBlur, type ZoomBlurOptions } from '../filters/motion-blur';
 import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
+import { oilPaint, type OilPaintOptions } from '../filters/oil';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
 import { applyQuantize } from '../filters/quantize';
 import { replaceColor } from '../filters/replace-color';
@@ -73,6 +75,7 @@ import { vignette, type VignetteOptions } from '../filters/vignette';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import { generateNoiseField, noiseToGrayscale } from '../engine/perlin';
+import { perspectiveWarp, type Quad } from '../tools/perspective';
 import {
   addSwatch,
   harmony,
@@ -131,6 +134,8 @@ export interface FilterOptionMap {
   'channel-mixer': ChannelMixerOptions;
   clarity: ClarityOptions;
   halftone: HalftoneOptions;
+  chromatic: ChromaticOptions;
+  oil: OilPaintOptions;
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -703,6 +708,7 @@ export interface AppState {
   cropToSelection: () => void;
   resizeCanvasTo: (w: number, h: number, anchor?: ResizeCanvasOptions['anchor']) => void;
   alignActiveLayer: (mode: AlignMode) => void;
+  applyPerspective: (dst: Quad) => void;
   mergeDown: (id: LayerId) => void;
   addLayerMask: (id: LayerId) => void;
   removeLayerMask: (id: LayerId) => void;
@@ -1546,6 +1552,27 @@ export const useStore = create<AppState>((set, get) => ({
     layer.pixels.set(translatePixels(layer.pixels, doc.width, doc.height, offset.dx, offset.dy));
     get().commitEdit('レイヤー整列', layer.id, before);
   },
+  applyPerspective: (dst) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const next = perspectiveWarp(layer.pixels, doc.width, doc.height, dst);
+    if (next.length !== before.length) return;
+
+    const layerId = layer.id;
+    const layers = doc.layers.map((item) => (
+      item.id === layerId ? { ...item, pixels: next } : item
+    ));
+    set({ doc: { ...doc, layers } });
+
+    if (!pixelsEqual(before, next)) {
+      get().commitEdit('パース変形', layerId, before);
+    } else {
+      set({ rev: get().rev + 1 });
+    }
+  },
   mergeDown: (id) => {
     const { doc } = get();
     const i = layerIndex(doc, id);
@@ -1914,6 +1941,24 @@ export const useStore = create<AppState>((set, get) => ({
           cellSize: 6,
           ...filterOpts,
           mask: selectionMask,
+        });
+        break;
+      }
+      case 'chromatic': {
+        const filterOpts = opts as FilterOptionMap['chromatic'] | undefined;
+        chromaticAberration(layer.pixels, doc.width, doc.height, {
+          amount: 4,
+          ...filterOpts,
+          mask: selectionMask ?? undefined,
+        });
+        break;
+      }
+      case 'oil': {
+        const filterOpts = opts as FilterOptionMap['oil'] | undefined;
+        oilPaint(layer.pixels, doc.width, doc.height, {
+          radius: 3,
+          ...filterOpts,
+          mask: selectionMask ?? undefined,
         });
         break;
       }

@@ -546,6 +546,10 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('bloom', { threshold: 200, radius: 6, intensity: 0.8 })}>ブルーム</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('chromatic', { amount: 4 })}>色収差</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('oil', { radius: 3 })}>油彩</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('brightness-contrast', { brightness: 10, contrast: 10 })}>
                 明るさ・コントラスト
               </button>
@@ -726,6 +730,17 @@ export function App() {
                 onClick={() => s.rotateActiveLayer('ccw')}>回転CCW</button>
               <button className="mini wide" disabled={!canTransformActive}
                 onClick={() => s.rotateActiveLayer('180')}>180度</button>
+              <button className="mini wide" disabled={!canTransformActive}
+                onClick={() => s.applyPerspective({
+                  x0: s.doc.width * 0.1,
+                  y0: 0,
+                  x1: s.doc.width * 0.9,
+                  y1: 0,
+                  x2: s.doc.width,
+                  y2: s.doc.height,
+                  x3: 0,
+                  y3: s.doc.height,
+                })}>パース変形</button>
             </div>
           </section>
 

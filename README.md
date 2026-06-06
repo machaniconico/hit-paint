@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (521 tests)
+npm test           # vitest (549 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -79,6 +79,8 @@ npm run typecheck  # tsc --noEmit
   網点スクリーンのハーフトーン(`filters/halftone`)、決定論的な value noise/fbm 生成(`engine/perlin`)。
 - **色収差 / 油彩 / パース変形** — radial な色収差(`filters/chromatic`)、エッジ保持の油彩 Kuwahara(`filters/oil`)、
   ホモグラフィによる4点パースペクティブ変形(`tools/perspective`、逆写像 bilinear)。
+- **セルラーノイズ / デュオトーン / クロマキー** — 決定論的 Worley(F1)ノイズ(`engine/cellular`)、
+  輝度→2色マッピングのデュオトーン(`filters/duotone`)、色距離でアルファを抜くクロマキー(`filters/chromakey`)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
