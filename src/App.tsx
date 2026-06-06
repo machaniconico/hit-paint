@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from './state/store';
 import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
@@ -22,12 +22,29 @@ const TOOLS: { id: ToolId; label: string; key: string }[] = [
   { id: 'brush', label: 'ブラシ', key: 'B' },
   { id: 'eraser', label: '消しゴム', key: 'E' },
   { id: 'fill', label: '塗りつぶし', key: 'G' },
+  { id: 'gradient', label: 'グラデーション', key: 'Shift+G' },
   { id: 'text', label: 'テキスト', key: 'T' },
   { id: 'eyedropper', label: 'スポイト', key: 'I' },
   { id: 'select-rect', label: '矩形選択', key: 'M' },
+  { id: 'select-ellipse', label: '楕円選択', key: 'Shift+M' },
   { id: 'move', label: '移動', key: 'V' },
+  { id: 'magic-wand', label: '自動選択', key: 'W' },
   { id: 'transform', label: '変形', key: 'R' },
   { id: 'pan', label: '手のひら', key: 'H' },
+];
+
+type EffectBrushKind = 'blur' | 'sharpen' | 'dodge' | 'burn';
+type ToolDrag = {
+  tool: 'gradient' | 'select-ellipse';
+  startX: number;
+  startY: number;
+};
+
+const EFFECT_BRUSH_KINDS: { kind: EffectBrushKind; label: string }[] = [
+  { kind: 'blur', label: 'ぼかし' },
+  { kind: 'sharpen', label: 'シャープ' },
+  { kind: 'dodge', label: '覆い焼き' },
+  { kind: 'burn', label: '焼き込み' },
 ];
 
 const ADJUSTMENT_TYPES: { type: AdjustmentSpec['type']; label: string; opts?: Record<string, number> }[] = [
@@ -68,6 +85,8 @@ export function App() {
   const [canvasW, setCanvasW] = useState(s.doc.width);
   const [canvasH, setCanvasH] = useState(s.doc.height);
   const [resizeFromCenter, setResizeFromCenter] = useState(false);
+  const [effectBrushKind, setEffectBrushKind] = useState<EffectBrushKind>('blur');
+  const toolDrag = useRef<ToolDrag | null>(null);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
   const activeTextData = activeLayer?.textData;
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
@@ -113,6 +132,16 @@ export function App() {
     downloadBlob(blob, `${s.doc.name}.png`);
   };
 
+  const stagePoint = (e: React.PointerEvent<HTMLElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return screenToDoc(e.clientX - rect.left, e.clientY - rect.top, s.viewport);
+  };
+
+  const centerPoint = () => ({
+    x: Math.floor(s.doc.width / 2),
+    y: Math.floor(s.doc.height / 2),
+  });
+
   return (
     <div className="app">
       <header className="menubar">
@@ -150,14 +179,47 @@ export function App() {
         <main
           className="stage"
           onPointerDownCapture={(e) => {
+            if (s.tool === 'magic-wand') {
+              e.preventDefault();
+              e.stopPropagation();
+              const point = stagePoint(e);
+              s.magicWandSelectAt(point.x, point.y, s.fillTolerance, true);
+              return;
+            }
+            if (s.tool === 'gradient' || s.tool === 'select-ellipse') {
+              e.preventDefault();
+              e.stopPropagation();
+              const point = stagePoint(e);
+              toolDrag.current = { tool: s.tool, startX: point.x, startY: point.y };
+              e.currentTarget.setPointerCapture(e.pointerId);
+              return;
+            }
             if (s.tool !== 'text') return;
             e.preventDefault();
             e.stopPropagation();
 
-            const rect = e.currentTarget.getBoundingClientRect();
-            const point = screenToDoc(e.clientX - rect.left, e.clientY - rect.top, s.viewport);
+            const point = stagePoint(e);
             const text = window.prompt('テキストを入力');
             if (text) s.createTextLayerAt(point.x, point.y, text);
+          }}
+          onPointerUpCapture={(e) => {
+            const drag = toolDrag.current;
+            if (!drag) return;
+            e.preventDefault();
+            e.stopPropagation();
+            toolDrag.current = null;
+            const point = stagePoint(e);
+            if (drag.tool === 'gradient') {
+              s.applyGradient(drag.startX, drag.startY, point.x, point.y);
+            } else {
+              const x = Math.min(drag.startX, point.x);
+              const y = Math.min(drag.startY, point.y);
+              const w = Math.abs(point.x - drag.startX);
+              const h = Math.abs(point.y - drag.startY);
+              if (w < 1 || h < 1) s.clearSelection();
+              else s.selectEllipse({ x, y, w, h });
+            }
+            try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
           }}
         >
           <Canvas />
@@ -334,6 +396,18 @@ export function App() {
           <section className="panel selection-tools">
             <h3>選択範囲</h3>
             <div className="selection-grid">
+              <button className="mini"
+                onClick={() => s.selectEllipse({
+                  x: s.doc.width * 0.25,
+                  y: s.doc.height * 0.25,
+                  w: s.doc.width * 0.5,
+                  h: s.doc.height * 0.5,
+                })}>楕円</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => {
+                  const point = centerPoint();
+                  s.magicWandSelectAt(point.x, point.y, s.fillTolerance, true);
+                }}>自動選択</button>
               <button className="mini" disabled={!s.doc.selection}
                 onClick={() => s.growSelectionBy(4)}>拡張</button>
               <button className="mini" disabled={!s.doc.selection}
@@ -341,6 +415,32 @@ export function App() {
               <button className="mini" disabled={!s.doc.selection}
                 onClick={() => s.featherSelectionBy(4)}>ぼかし</button>
             </div>
+          </section>
+
+          <section className="panel tool-actions">
+            <h3>ツール実行</h3>
+            <button className="mini wide" disabled={!canFilterActive}
+              onClick={() => s.applyGradient(0, 0, Math.max(1, s.doc.width - 1), 0)}>
+              横グラデーション
+            </button>
+            <div className="effect-kind-grid">
+              {EFFECT_BRUSH_KINDS.map((item) => (
+                <button
+                  key={item.kind}
+                  className={effectBrushKind === item.kind ? 'mini active' : 'mini'}
+                  onClick={() => setEffectBrushKind(item.kind)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <button className="mini wide" disabled={!canFilterActive}
+              onClick={() => {
+                const point = centerPoint();
+                s.effectBrushDab(effectBrushKind, point.x, point.y);
+              }}>
+              効果ブラシ
+            </button>
           </section>
 
           <section className="panel transform-tools">

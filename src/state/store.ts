@@ -13,9 +13,13 @@ import { History, pixelSnapshotCommand } from '../core/history';
 import { StrokeEngine } from '../engine/brush';
 import { BLACK, WHITE } from '../color/color';
 import { floodFill, fillRegion } from '../tools/fill';
+import { fillLinearGradient } from '../tools/gradient';
+import { ellipseMask, rectMask } from '../tools/marquee';
+import { selectionMaskFromColor } from '../tools/magic-wand';
 import { paintMaskDab } from '../tools/mask-paint';
 import { featherSelection, growSelection, invertSelection, selectAll, shrinkSelection } from '../tools/selection';
 import { moveLayerPixels } from '../tools/transform';
+import { blurDab, burnDab, dodgeDab, sharpenDab } from '../engine/effect-brush';
 import { flipHorizontal, flipVertical, rotate180, rotate90CCW, rotate90CW } from '../tools/layer-transform';
 import { cropDocument, resizeCanvas, type ResizeCanvasOptions } from '../core/doc-ops';
 import { alignOffset, opaqueBounds, translatePixels, type AlignMode } from '../core/layer-bounds';
@@ -238,6 +242,8 @@ export interface AppState {
   pickColorAt: (x: number, y: number) => void;
   setFillTolerance: (n: number) => void;
   floodFillAt: (x: number, y: number) => void;
+  applyGradient: (x0: number, y0: number, x1: number, y1: number) => void;
+  effectBrushDab: (kind: 'blur' | 'sharpen' | 'dodge' | 'burn', x: number, y: number) => void;
   moveActiveLayer: (dx: number, dy: number) => void;
   placeTextAt: (x: number, y: number, text: string) => void;
   createTextLayerAt: (x: number, y: number, text: string) => void;
@@ -245,6 +251,9 @@ export interface AppState {
 
   // selection
   setSelection: (sel: Selection | null) => void;
+  selectRect: (bounds: { x: number; y: number; w: number; h: number }) => void;
+  selectEllipse: (bounds: { x: number; y: number; w: number; h: number }) => void;
+  magicWandSelectAt: (x: number, y: number, tolerance: number, contiguous: boolean) => void;
   selectAllArea: () => void;
   invertSelectionArea: () => void;
   clearSelection: () => void;
@@ -438,6 +447,81 @@ export const useStore = create<AppState>((set, get) => ({
     if (!changed) return;
     get().commitEdit('塗りつぶし', layer.id, before);
   },
+  applyGradient: (x0, y0, x1, y1) => {
+    const { doc, primary, secondary } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked || !layer.visible) return;
+
+    const before = layer.pixels.slice();
+    const endColor = secondary.a > 0 ? secondary : { ...primary, a: 0 };
+    fillLinearGradient(layer.pixels, doc.width, doc.height, {
+      x0,
+      y0,
+      x1,
+      y1,
+      stops: [
+        { t: 0, color: primary },
+        { t: 1, color: endColor },
+      ],
+      mask: doc.selection?.mask ?? null,
+    });
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('グラデーション', layer.id, before);
+    }
+  },
+  effectBrushDab: (kind, x, y) => {
+    const { doc, brush } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked || !layer.visible) return;
+
+    const before = layer.pixels.slice();
+    const opts = {
+      x,
+      y,
+      radius: Math.max(0.5, brush.size / 2),
+      strength: Math.max(0, Math.min(1, brush.opacity * brush.flow)),
+      hardness: brush.hardness,
+    };
+
+    switch (kind) {
+      case 'blur':
+        blurDab(layer.pixels, doc.width, doc.height, opts);
+        break;
+      case 'sharpen':
+        sharpenDab(layer.pixels, doc.width, doc.height, opts);
+        break;
+      case 'dodge':
+        dodgeDab(layer.pixels, doc.width, doc.height, opts);
+        break;
+      case 'burn':
+        burnDab(layer.pixels, doc.width, doc.height, opts);
+        break;
+    }
+
+    if (doc.selection) {
+      for (let pi = 0; pi < doc.selection.mask.length; pi += 1) {
+        const coverage = doc.selection.mask[pi] / 255;
+        if (coverage >= 1) continue;
+        const o = pi * 4;
+        if (coverage <= 0) {
+          layer.pixels[o] = before[o];
+          layer.pixels[o + 1] = before[o + 1];
+          layer.pixels[o + 2] = before[o + 2];
+          layer.pixels[o + 3] = before[o + 3];
+        } else {
+          layer.pixels[o] = before[o] + (layer.pixels[o] - before[o]) * coverage;
+          layer.pixels[o + 1] = before[o + 1] + (layer.pixels[o + 1] - before[o + 1]) * coverage;
+          layer.pixels[o + 2] = before[o + 2] + (layer.pixels[o + 2] - before[o + 2]) * coverage;
+          layer.pixels[o + 3] = before[o + 3] + (layer.pixels[o + 3] - before[o + 3]) * coverage;
+        }
+      }
+    }
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('効果ブラシ', layer.id, before);
+    }
+  },
   moveActiveLayer: (dx, dy) => {
     const { doc } = get();
     const layer = activeLayer(doc);
@@ -521,6 +605,36 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setSelection: (sel) => set({ doc: { ...get().doc, selection: sel }, rev: get().rev + 1 }),
+  selectRect: (bounds) => {
+    const { doc } = get();
+    const mask = rectMask(doc.width, doc.height, {
+      x: bounds.x,
+      y: bounds.y,
+      rw: bounds.w,
+      rh: bounds.h,
+    });
+    set({ doc: { ...doc, selection: { mask, width: doc.width, height: doc.height } }, rev: get().rev + 1 });
+  },
+  selectEllipse: (bounds) => {
+    const { doc } = get();
+    const mask = ellipseMask(doc.width, doc.height, {
+      cx: bounds.x + bounds.w / 2,
+      cy: bounds.y + bounds.h / 2,
+      rx: Math.abs(bounds.w) / 2,
+      ry: Math.abs(bounds.h) / 2,
+    });
+    set({ doc: { ...doc, selection: { mask, width: doc.width, height: doc.height } }, rev: get().rev + 1 });
+  },
+  magicWandSelectAt: (x, y, tolerance, contiguous) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels) return;
+
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const mask = selectionMaskFromColor(layer.pixels, doc.width, doc.height, ix, iy, { tolerance, contiguous });
+    set({ doc: { ...doc, selection: { mask, width: doc.width, height: doc.height } }, rev: get().rev + 1 });
+  },
   selectAllArea: () => {
     const { doc } = get();
     set({ doc: { ...doc, selection: selectAll(doc.width, doc.height) }, rev: get().rev + 1 });

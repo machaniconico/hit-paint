@@ -176,10 +176,13 @@ export type ToolId =
   | 'brush'
   | 'eraser'
   | 'fill'
+  | 'gradient'
   | 'text'
   | 'eyedropper'
   | 'select-rect'
+  | 'select-ellipse'
   | 'select-lasso'
+  | 'magic-wand'
   | 'move'
   | 'transform'
   | 'pan';
