@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createTimeline, removeFrame as removeTimelineFrame, type Frame, type Timeline } from '../anim/timeline';
 import type {
   AdjustmentSpec, BrushSettings, Layer, LayerId, PaintDocument, PointerSample, RGBA, ToolId, Viewport,
 } from '../types';
@@ -116,6 +117,7 @@ interface StrokeContext {
 }
 let activeStroke: StrokeContext | null = null;
 let activeMaskStroke: LayerId | null = null;
+let animFrameCounter = 0;
 export const getActiveStroke = () => activeStroke;
 
 const history = new History(60);
@@ -365,6 +367,65 @@ function cloneTextLayerData(data: TextLayerData): TextLayerData {
   return { ...data, color: { ...data.color } };
 }
 
+function cloneLayerSnapshot(layer: Layer): Layer {
+  return {
+    ...layer,
+    pixels: layer.pixels?.slice(),
+    mask: layer.mask?.slice(),
+    textData: layer.textData ? cloneTextLayerData(layer.textData) : undefined,
+    children: layer.children ? [...layer.children] : undefined,
+    adjustment: layer.adjustment ? { ...layer.adjustment, opts: layer.adjustment.opts ? { ...layer.adjustment.opts } : undefined } : undefined,
+  };
+}
+
+function cloneLayerSnapshots(layers: Layer[]): Layer[] {
+  return layers.map(cloneLayerSnapshot);
+}
+
+function timelineFromLayers(layers: Layer[], fps = 12): Timeline {
+  const timeline = createTimeline(fps);
+  return {
+    ...timeline,
+    frames: [{
+      ...timeline.frames[0],
+      layers: cloneLayerSnapshots(layers),
+    }],
+    currentIndex: 0,
+  };
+}
+
+function clampTimelineIndex(timeline: Timeline, index: number): number {
+  const max = Math.max(0, timeline.frames.length - 1);
+  if (!Number.isFinite(index)) return 0;
+  return Math.max(0, Math.min(Math.trunc(index), max));
+}
+
+function snapshotCurrentTimelineFrame(timeline: Timeline, doc: PaintDocument): Timeline {
+  const safeTimeline = timeline.frames.length > 0 ? timeline : timelineFromLayers(doc.layers, timeline.fps);
+  const currentIndex = clampTimelineIndex(safeTimeline, safeTimeline.currentIndex);
+  return {
+    ...safeTimeline,
+    currentIndex,
+    frames: safeTimeline.frames.map((frame, index) => (
+      index === currentIndex ? { ...frame, layers: cloneLayerSnapshots(doc.layers) } : frame
+    )),
+  };
+}
+
+function cloneFrame(frame: Frame): Frame {
+  animFrameCounter += 1;
+  return {
+    ...frame,
+    id: `anim_frame_${animFrameCounter}`,
+    layers: cloneLayerSnapshots(frame.layers),
+  };
+}
+
+function validActiveLayerId(layers: Layer[], preferred: LayerId | null): LayerId | null {
+  if (preferred && layers.some((layer) => layer.id === preferred)) return preferred;
+  return layers[layers.length - 1]?.id ?? null;
+}
+
 function textLayerDataEquals(a: TextLayerData, b: TextLayerData): boolean {
   return (
     a.text === b.text
@@ -382,14 +443,7 @@ function textLayerDataEquals(a: TextLayerData, b: TextLayerData): boolean {
 function cloneDocumentSnapshot(doc: PaintDocument): PaintDocument {
   return {
     ...doc,
-    layers: doc.layers.map((layer) => ({
-      ...layer,
-      pixels: layer.pixels?.slice(),
-      mask: layer.mask?.slice(),
-      textData: layer.textData ? cloneTextLayerData(layer.textData) : undefined,
-      children: layer.children ? [...layer.children] : undefined,
-      adjustment: layer.adjustment ? { ...layer.adjustment, opts: layer.adjustment.opts ? { ...layer.adjustment.opts } : undefined } : undefined,
-    })),
+    layers: cloneLayerSnapshots(doc.layers),
     selection: doc.selection
       ? { ...doc.selection, mask: doc.selection.mask.slice() }
       : null,
@@ -473,6 +527,8 @@ function compositeMaskWithColor(
 
 export interface AppState {
   doc: PaintDocument;
+  timeline: Timeline;
+  onionSkinEnabled: boolean;
   viewport: Viewport;
   tool: ToolId;
   brush: BrushSettings;
@@ -494,6 +550,11 @@ export interface AppState {
   // document lifecycle
   newDocument: (w?: number, h?: number, name?: string) => void;
   loadDocument: (doc: PaintDocument) => void;
+  captureCurrentFrame: () => void;
+  addAnimFrame: () => void;
+  gotoAnimFrame: (index: number) => void;
+  removeAnimFrame: (index: number) => void;
+  setOnionSkin: (on: boolean) => void;
 
   // tool & brush & color
   setTool: (t: ToolId) => void;
@@ -577,8 +638,12 @@ export interface AppState {
   bump: () => void;
 }
 
+const initialDocument = createDocument();
+
 export const useStore = create<AppState>((set, get) => ({
-  doc: createDocument(),
+  doc: initialDocument,
+  timeline: timelineFromLayers(initialDocument.layers),
+  onionSkinEnabled: false,
   viewport: { ...IDENTITY_VIEWPORT },
   tool: 'brush',
   brush: { ...DEFAULT_BRUSH },
@@ -599,8 +664,11 @@ export const useStore = create<AppState>((set, get) => ({
     history.clear();
     activeStroke = null;
     activeMaskStroke = null;
+    const doc = createDocument(w, h, name);
     set({
-      doc: createDocument(w, h, name),
+      doc,
+      timeline: timelineFromLayers(doc.layers),
+      onionSkinEnabled: false,
       symmetry: defaultSymmetry(w, h),
       rev: get().rev + 1,
       isStroking: false,
@@ -615,6 +683,8 @@ export const useStore = create<AppState>((set, get) => ({
     activeMaskStroke = null;
     set({
       doc,
+      timeline: timelineFromLayers(doc.layers),
+      onionSkinEnabled: false,
       symmetry: defaultSymmetry(doc.width, doc.height),
       rev: get().rev + 1,
       isStroking: false,
@@ -623,6 +693,59 @@ export const useStore = create<AppState>((set, get) => ({
       penPath: null,
     });
   },
+  captureCurrentFrame: () => {
+    const { doc, timeline } = get();
+    set({ timeline: snapshotCurrentTimelineFrame(timeline, doc) });
+  },
+  addAnimFrame: () => {
+    const { doc, timeline } = get();
+    const savedTimeline = snapshotCurrentTimelineFrame(timeline, doc);
+    const sourceFrame = savedTimeline.frames[savedTimeline.currentIndex];
+    const nextFrame = cloneFrame(sourceFrame);
+    const frames = [...savedTimeline.frames, nextFrame];
+    set({
+      timeline: {
+        ...savedTimeline,
+        frames,
+        currentIndex: frames.length - 1,
+      },
+    });
+  },
+  gotoAnimFrame: (index) => {
+    const { doc, timeline } = get();
+    const savedTimeline = snapshotCurrentTimelineFrame(timeline, doc);
+    const currentIndex = clampTimelineIndex(savedTimeline, index);
+    const layers = cloneLayerSnapshots(savedTimeline.frames[currentIndex].layers);
+    set({
+      doc: {
+        ...doc,
+        layers,
+        activeLayerId: validActiveLayerId(layers, doc.activeLayerId),
+      },
+      timeline: {
+        ...savedTimeline,
+        currentIndex,
+      },
+      rev: get().rev + 1,
+    });
+  },
+  removeAnimFrame: (index) => {
+    const { doc, timeline } = get();
+    const savedTimeline = snapshotCurrentTimelineFrame(timeline, doc);
+    const nextTimeline = removeTimelineFrame(savedTimeline, index);
+    const activeFrame = nextTimeline.frames[nextTimeline.currentIndex];
+    const layers = cloneLayerSnapshots(activeFrame.layers);
+    set({
+      doc: {
+        ...doc,
+        layers,
+        activeLayerId: validActiveLayerId(layers, doc.activeLayerId),
+      },
+      timeline: nextTimeline,
+      rev: get().rev + 1,
+    });
+  },
+  setOnionSkin: (on) => set({ onionSkinEnabled: on }),
 
   setTool: (t) => set({ tool: t }),
   setBrush: (patch) => set({ brush: { ...get().brush, ...patch } }),

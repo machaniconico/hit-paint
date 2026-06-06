@@ -102,6 +102,20 @@ body {
   width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--border);
   border-radius: 6px; padding: 5px 6px;
 }
+.anim-fps { color: var(--accent); font-size: 11px; font-weight: 600; }
+.frame-strip {
+  display: flex; flex-wrap: wrap; gap: 4px; max-height: 84px; overflow-y: auto;
+}
+.frame-button {
+  width: 32px; height: 28px; flex: 0 0 auto;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; cursor: pointer; font-size: 12px;
+}
+.frame-button.active { background: #2f4055; border-color: var(--accent); color: #fff; }
+.anim-actions {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px;
+}
+.anim-toggle { margin-top: 8px; }
 
 .layers ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .layers h3 { align-items: flex-start; gap: 8px; }

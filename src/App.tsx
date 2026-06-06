@@ -659,6 +659,58 @@ export function App() {
             </button>
           </section>
 
+          <section className="panel anim-panel">
+            <h3>
+              アニメ
+              <span className="anim-fps">{s.timeline.fps}fps</span>
+            </h3>
+            <div className="frame-strip" aria-label="アニメフレーム">
+              {s.timeline.frames.map((frame, index) => (
+                <button
+                  key={frame.id}
+                  className={index === s.timeline.currentIndex ? 'frame-button active' : 'frame-button'}
+                  title={`${index + 1}フレーム / ${frame.durationMs}ms`}
+                  onClick={() => s.gotoAnimFrame(index)}
+                >
+                  {index + 1}
+                </button>
+              ))}
+            </div>
+            <div className="anim-actions">
+              <button
+                className="mini"
+                disabled={s.timeline.currentIndex <= 0}
+                onClick={() => s.gotoAnimFrame(s.timeline.currentIndex - 1)}
+              >
+                前
+              </button>
+              <button
+                className="mini"
+                disabled={s.timeline.currentIndex >= s.timeline.frames.length - 1}
+                onClick={() => s.gotoAnimFrame(s.timeline.currentIndex + 1)}
+              >
+                次
+              </button>
+              <button className="mini" onClick={s.addAnimFrame}>追加</button>
+              <button className="mini" onClick={s.addAnimFrame}>複製</button>
+              <button
+                className="mini"
+                disabled={s.timeline.frames.length <= 1}
+                onClick={() => s.removeAnimFrame(s.timeline.currentIndex)}
+              >
+                削除
+              </button>
+            </div>
+            <label className="check anim-toggle">
+              <input
+                type="checkbox"
+                checked={s.onionSkinEnabled}
+                onChange={(e) => s.setOnionSkin(e.target.checked)}
+              />
+              オニオンスキン
+            </label>
+          </section>
+
           <section className="panel layers">
             <h3>
               レイヤー
