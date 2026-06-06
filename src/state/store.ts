@@ -16,6 +16,9 @@ import { floodFill, fillRegion } from '../tools/fill';
 import { paintMaskDab } from '../tools/mask-paint';
 import { featherSelection, growSelection, invertSelection, selectAll, shrinkSelection } from '../tools/selection';
 import { moveLayerPixels } from '../tools/transform';
+import { flipHorizontal, flipVertical, rotate180, rotate90CCW, rotate90CW } from '../tools/layer-transform';
+import { cropDocument, resizeCanvas, type ResizeCanvasOptions } from '../core/doc-ops';
+import { alignOffset, opaqueBounds, translatePixels, type AlignMode } from '../core/layer-bounds';
 import type { Selection } from '../types';
 import { renderText } from '../text';
 import { createTextLayerData, rasterizeTextLayer, updateTextLayerData } from '../text/text-layer';
@@ -130,6 +133,72 @@ function textLayerDataEquals(a: TextLayerData, b: TextLayerData): boolean {
   );
 }
 
+function cloneDocumentSnapshot(doc: PaintDocument): PaintDocument {
+  return {
+    ...doc,
+    layers: doc.layers.map((layer) => ({
+      ...layer,
+      pixels: layer.pixels?.slice(),
+      mask: layer.mask?.slice(),
+      textData: layer.textData ? cloneTextLayerData(layer.textData) : undefined,
+      children: layer.children ? [...layer.children] : undefined,
+      adjustment: layer.adjustment ? { ...layer.adjustment, opts: layer.adjustment.opts ? { ...layer.adjustment.opts } : undefined } : undefined,
+    })),
+    selection: doc.selection
+      ? { ...doc.selection, mask: doc.selection.mask.slice() }
+      : null,
+  };
+}
+
+function selectionBounds(selection: Selection): { x: number; y: number; w: number; h: number } | null {
+  let minX = selection.width;
+  let minY = selection.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < selection.height; y += 1) {
+    for (let x = 0; x < selection.width; x += 1) {
+      if (selection.mask[y * selection.width + x] === 0) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+function fitRotatedPixels(
+  rotated: { pixels: Uint8ClampedArray; width: number; height: number },
+  width: number,
+  height: number,
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(width * height * 4);
+  const offsetX = Math.floor((width - rotated.width) / 2);
+  const offsetY = Math.floor((height - rotated.height) / 2);
+
+  for (let y = 0; y < rotated.height; y += 1) {
+    const dstY = y + offsetY;
+    if (dstY < 0 || dstY >= height) continue;
+
+    for (let x = 0; x < rotated.width; x += 1) {
+      const dstX = x + offsetX;
+      if (dstX < 0 || dstX >= width) continue;
+
+      const source = (y * rotated.width + x) * 4;
+      const target = (dstY * width + dstX) * 4;
+      out[target] = rotated.pixels[source];
+      out[target + 1] = rotated.pixels[source + 1];
+      out[target + 2] = rotated.pixels[source + 2];
+      out[target + 3] = rotated.pixels[source + 3];
+    }
+  }
+
+  return out;
+}
+
 export interface AppState {
   doc: PaintDocument;
   viewport: Viewport;
@@ -191,6 +260,11 @@ export interface AppState {
   selectLayer: (id: LayerId) => void;
   setLayerProps: (id: LayerId, patch: Partial<Layer>) => void;
   moveLayer: (id: LayerId, dir: -1 | 1) => void;
+  flipActiveLayer: (axis: 'h' | 'v') => void;
+  rotateActiveLayer: (dir: 'cw' | 'ccw' | '180') => void;
+  cropToSelection: () => void;
+  resizeCanvasTo: (w: number, h: number, anchor?: ResizeCanvasOptions['anchor']) => void;
+  alignActiveLayer: (mode: AlignMode) => void;
   mergeDown: (id: LayerId) => void;
   addLayerMask: (id: LayerId) => void;
   removeLayerMask: (id: LayerId) => void;
@@ -518,6 +592,84 @@ export const useStore = create<AppState>((set, get) => ({
     const layers = [...doc.layers];
     [layers[i], layers[j]] = [layers[j], layers[i]];
     set({ doc: { ...doc, layers }, rev: get().rev + 1 });
+  },
+  flipActiveLayer: (axis) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const next = axis === 'h'
+      ? flipHorizontal(layer.pixels, doc.width, doc.height)
+      : flipVertical(layer.pixels, doc.width, doc.height);
+    layer.pixels.set(next);
+    get().commitEdit(axis === 'h' ? '左右反転' : '上下反転', layer.id, before);
+  },
+  rotateActiveLayer: (dir) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const next = dir === '180'
+      ? rotate180(layer.pixels, doc.width, doc.height).pixels
+      : fitRotatedPixels(
+        dir === 'cw'
+          ? rotate90CW(layer.pixels, doc.width, doc.height)
+          : rotate90CCW(layer.pixels, doc.width, doc.height),
+        doc.width,
+        doc.height,
+      );
+    layer.pixels.set(next);
+    get().commitEdit(dir === 'cw' ? '時計回りに回転' : dir === 'ccw' ? '反時計回りに回転' : '180度回転', layer.id, before);
+  },
+  cropToSelection: () => {
+    const { doc } = get();
+    if (!doc.selection) return;
+
+    const bounds = selectionBounds(doc.selection);
+    if (!bounds) return;
+
+    const before = cloneDocumentSnapshot(doc);
+    const after = cloneDocumentSnapshot(cropDocument(doc, bounds));
+    history.push({
+      label: '選択範囲でクロップ',
+      undo: () => set({ doc: cloneDocumentSnapshot(before), rev: get().rev + 1 }),
+      redo: () => set({ doc: cloneDocumentSnapshot(after), rev: get().rev + 1 }),
+    });
+    set({ doc: cloneDocumentSnapshot(after), rev: get().rev + 1, canUndo: history.canUndo(), canRedo: history.canRedo() });
+  },
+  resizeCanvasTo: (w, h, anchor) => {
+    const { doc } = get();
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+
+    const width = Math.trunc(w);
+    const height = Math.trunc(h);
+    if (width <= 0 || height <= 0 || (width === doc.width && height === doc.height)) return;
+
+    const before = cloneDocumentSnapshot(doc);
+    const after = cloneDocumentSnapshot(resizeCanvas(doc, { w: width, h: height, anchor }));
+    history.push({
+      label: 'キャンバスサイズ変更',
+      undo: () => set({ doc: cloneDocumentSnapshot(before), rev: get().rev + 1 }),
+      redo: () => set({ doc: cloneDocumentSnapshot(after), rev: get().rev + 1 }),
+    });
+    set({ doc: cloneDocumentSnapshot(after), rev: get().rev + 1, canUndo: history.canUndo(), canRedo: history.canRedo() });
+  },
+  alignActiveLayer: (mode) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const bounds = opaqueBounds(layer.pixels, doc.width, doc.height);
+    if (!bounds) return;
+
+    const offset = alignOffset(bounds, { w: doc.width, h: doc.height }, mode);
+    if (offset.dx === 0 && offset.dy === 0) return;
+
+    const before = layer.pixels.slice();
+    layer.pixels.set(translatePixels(layer.pixels, doc.width, doc.height, offset.dx, offset.dy));
+    get().commitEdit('レイヤー整列', layer.id, before);
   },
   mergeDown: (id) => {
     const { doc } = get();

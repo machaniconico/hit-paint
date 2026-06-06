@@ -70,11 +70,22 @@ body {
 .swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
 .mini { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; padding: 0 6px; }
 .mini:disabled { opacity: 0.45; cursor: default; }
-.filter-grid, .selection-grid, .adjustment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini { min-height: 28px; padding: 4px 6px; }
+.filter-grid, .selection-grid, .adjustment-grid, .transform-grid, .align-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+.filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini, .transform-grid .mini, .align-grid .mini {
+  min-height: 28px; padding: 4px 6px;
+}
 .filter-grid .wide { grid-column: 1 / -1; }
 .selection-grid { grid-template-columns: repeat(3, 1fr); }
+.align-grid { grid-template-columns: repeat(3, 1fr); }
+.transform-grid .wide { grid-column: 1 / -1; }
 .adjustment-grid { grid-template-columns: 1fr; }
+.canvas-size { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.canvas-size input {
+  width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 6px;
+}
 
 .layers ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .layers h3 { align-items: flex-start; gap: 8px; }

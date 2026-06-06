@@ -203,6 +203,26 @@ export async function importPSD(buffer: ArrayBuffer): Promise<ImportResult> {
 // Export
 // ---------------------------------------------------------------------------
 
+function pixelsWithMaskBakedIntoAlpha(
+  pixels: Uint8ClampedArray,
+  mask: Uint8ClampedArray | undefined,
+  width: number,
+  height: number,
+): Uint8ClampedArray {
+  if (!mask) return pixels;
+
+  const baked = new Uint8ClampedArray(pixels);
+  const pixelCount = width * height;
+
+  for (let p = 0; p < pixelCount; p++) {
+    const alphaIndex = p * 4 + 3;
+    const coverage = mask[p] ?? 0;
+    baked[alphaIndex] = Math.round((baked[alphaIndex] * coverage) / 255);
+  }
+
+  return baked;
+}
+
 /**
  * Serialise a PaintDocument to a PSD ArrayBuffer.
  *
@@ -217,9 +237,12 @@ export function exportPSD(doc: PaintDocument): ArrayBuffer {
     const agBlendMode = OUR_TO_AG[layer.blendMode] ?? 'normal';
 
     // Build an ImageData-compatible object for ag-psd (works headlessly).
+    const data = layer.pixels
+      ? pixelsWithMaskBakedIntoAlpha(layer.pixels, layer.mask, width, height)
+      : undefined;
     const pixelData = layer.pixels
       ? {
-          data: layer.pixels,
+          data,
           width,
           height,
         }

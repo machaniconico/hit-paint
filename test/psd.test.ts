@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createDocument } from '../src/core/document';
+import { createDocument, createLayerMask } from '../src/core/document';
 import { exportPSD, importPSD } from '../src/io/psd';
 
 describe('PSD import/export round-trip', () => {
@@ -57,6 +57,61 @@ describe('PSD import/export round-trip', () => {
     expect(Math.abs(px[pixelIdx + 1] - 100)).toBeLessThanOrEqual(tolerance);
     expect(Math.abs(px[pixelIdx + 2] - 50)).toBeLessThanOrEqual(tolerance);
     expect(Math.abs(px[pixelIdx + 3] - 255)).toBeLessThanOrEqual(tolerance);
+  });
+
+  it('bakes layer mask coverage into exported PSD layer alpha', async () => {
+    const doc = createDocument(2, 1);
+    const layer = doc.layers[1];
+    expect(layer.pixels).toBeDefined();
+
+    layer.pixels!.set([
+      255, 0, 0, 200,
+      0, 0, 255, 200,
+    ]);
+    layer.mask = new Uint8ClampedArray([0, 128]);
+
+    const buf = exportPSD(doc);
+    const result = await importPSD(buf);
+    const px = result.doc.layers[1].pixels!;
+
+    expect(px[3]).toBe(0);
+    expect(Math.abs(px[7] - 100)).toBeLessThanOrEqual(2);
+  });
+
+  it('round-trips unmasked layer alpha without mask baking changes', async () => {
+    const doc = createDocument(2, 1);
+    const layer = doc.layers[1];
+    expect(layer.pixels).toBeDefined();
+
+    layer.pixels!.set([
+      40, 80, 120, 64,
+      160, 120, 80, 255,
+    ]);
+
+    const buf = exportPSD(doc);
+    const result = await importPSD(buf);
+    const px = result.doc.layers[1].pixels!;
+
+    expect(Math.abs(px[3] - 64)).toBeLessThanOrEqual(2);
+    expect(Math.abs(px[7] - 255)).toBeLessThanOrEqual(2);
+  });
+
+  it('exports pixel-less masked layers safely', () => {
+    const doc = createDocument(2, 1);
+    doc.layers.push({
+      id: 'group-with-mask',
+      name: 'group with mask',
+      kind: 'group',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      locked: false,
+      clipping: false,
+      mask: createLayerMask(2, 1, 0),
+      children: [],
+    });
+
+    expect(() => exportPSD(doc)).not.toThrow();
   });
 
   it('emits no fatal warnings for a clean document', async () => {

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from './state/store';
 import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
 import type { AdjustmentSpec, BlendMode, ToolId } from './types';
+import type { AlignMode } from './core/layer-bounds';
 import { BLEND_MODES } from './types';
 import { importPSD, exportPSD } from './io/psd';
 import { importCLIP, exportCLIP } from './io/clip';
@@ -37,6 +38,15 @@ const ADJUSTMENT_TYPES: { type: AdjustmentSpec['type']; label: string; opts?: Re
   { type: 'levels', label: 'レベル', opts: { inBlack: 16, inWhite: 239, gamma: 1, outBlack: 0, outWhite: 255 } },
 ];
 
+const ALIGN_BUTTONS: { mode: AlignMode; label: string }[] = [
+  { mode: 'left', label: '左' },
+  { mode: 'hcenter', label: '中央' },
+  { mode: 'right', label: '右' },
+  { mode: 'top', label: '上' },
+  { mode: 'vcenter', label: '中' },
+  { mode: 'bottom', label: '下' },
+];
+
 function screenToDoc(
   sx: number,
   sy: number,
@@ -55,10 +65,19 @@ export function App() {
   const s = useStore();
   const [blurRadius, setBlurRadius] = useState(4);
   const [mosaicBlockSize, setMosaicBlockSize] = useState(4);
+  const [canvasW, setCanvasW] = useState(s.doc.width);
+  const [canvasH, setCanvasH] = useState(s.doc.height);
+  const [resizeFromCenter, setResizeFromCenter] = useState(false);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
   const activeTextData = activeLayer?.textData;
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
   const canMaskActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster');
+  const canTransformActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
+
+  useEffect(() => {
+    setCanvasW(s.doc.width);
+    setCanvasH(s.doc.height);
+  }, [s.doc.width, s.doc.height]);
 
   const openFile = async () => {
     try {
@@ -322,6 +341,77 @@ export function App() {
               <button className="mini" disabled={!s.doc.selection}
                 onClick={() => s.featherSelectionBy(4)}>ぼかし</button>
             </div>
+          </section>
+
+          <section className="panel transform-tools">
+            <h3>変換</h3>
+            <div className="transform-grid">
+              <button className="mini" disabled={!canTransformActive}
+                onClick={() => s.flipActiveLayer('h')}>左右反転</button>
+              <button className="mini" disabled={!canTransformActive}
+                onClick={() => s.flipActiveLayer('v')}>上下反転</button>
+              <button className="mini" disabled={!canTransformActive}
+                onClick={() => s.rotateActiveLayer('cw')}>回転CW</button>
+              <button className="mini" disabled={!canTransformActive}
+                onClick={() => s.rotateActiveLayer('ccw')}>回転CCW</button>
+              <button className="mini wide" disabled={!canTransformActive}
+                onClick={() => s.rotateActiveLayer('180')}>180度</button>
+            </div>
+          </section>
+
+          <section className="panel align-tools">
+            <h3>整列</h3>
+            <div className="align-grid">
+              {ALIGN_BUTTONS.map((item) => (
+                <button
+                  key={item.mode}
+                  className="mini"
+                  disabled={!canTransformActive}
+                  onClick={() => s.alignActiveLayer(item.mode)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel doc-tools">
+            <h3>ドキュメント</h3>
+            <button className="mini wide" disabled={!s.doc.selection} onClick={s.cropToSelection}>
+              選択範囲でクロップ
+            </button>
+            <div className="canvas-size">
+              <label>W
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={canvasW}
+                  onChange={(e) => setCanvasW(Math.max(1, Math.trunc(Number(e.target.value) || 1)))}
+                />
+              </label>
+              <label>H
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={canvasH}
+                  onChange={(e) => setCanvasH(Math.max(1, Math.trunc(Number(e.target.value) || 1)))}
+                />
+              </label>
+            </div>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={resizeFromCenter}
+                onChange={(e) => setResizeFromCenter(e.target.checked)}
+              />
+              中央基準
+            </label>
+            <button className="mini wide"
+              onClick={() => s.resizeCanvasTo(canvasW, canvasH, resizeFromCenter ? 'center' : 'top-left')}>
+              キャンバスサイズ変更
+            </button>
           </section>
 
           <section className="panel layers">
