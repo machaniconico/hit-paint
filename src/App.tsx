@@ -140,11 +140,42 @@ export function App() {
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
   const activeTextData = activeLayer?.textData;
   const activeShapeData = activeLayer?.shapeData;
+  const activeShapeFill = activeShapeData?.style.fill ?? null;
+  const activeShapeStroke = activeShapeData?.style.stroke ?? null;
+  const shapeCornerRadiusMax = activeShapeData
+    ? Math.max(activeShapeData.cornerRadius ?? 0, Math.floor(Math.min(
+      Math.abs(activeShapeData.width),
+      Math.abs(activeShapeData.height),
+    ) / 2))
+    : 0;
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
   const canMaskActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster');
   const canTransformActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
   const canCommitPenFill = Boolean(s.penPath && s.penPath.closed && s.penPath.points.length >= 3);
   const canCommitPenStroke = Boolean(s.penPath && s.penPath.points.length >= 2);
+
+  const updateShapeNumber = (patchKey: 'cornerRadius' | 'sides' | 'innerRatio', value: number): void => {
+    if (!Number.isFinite(value)) return;
+    if (patchKey === 'cornerRadius') {
+      s.updateActiveShapeLayer({ cornerRadius: Math.max(0, Math.trunc(value)) });
+    } else if (patchKey === 'sides') {
+      s.updateActiveShapeLayer({ sides: Math.max(3, Math.trunc(value)) });
+    } else {
+      s.updateActiveShapeLayer({ innerRatio: Math.max(0, Math.min(1, value)) });
+    }
+  };
+
+  const updateShapeStrokeWidth = (value: number): void => {
+    if (!Number.isFinite(value) || !activeShapeStroke) return;
+    s.updateActiveShapeLayer({
+      style: {
+        stroke: {
+          color: activeShapeStroke.color,
+          width: Math.max(1, Math.trunc(value)),
+        },
+      },
+    });
+  };
 
   useEffect(() => {
     setCanvasW(s.doc.width);
@@ -511,6 +542,10 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('blur', { radius: blurRadius })}>ぼかし</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('gaussian', { radius: blurRadius })}>ガウスぼかし</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('bloom', { threshold: 200, radius: 6, intensity: 0.8 })}>ブルーム</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('brightness-contrast', { brightness: 10, contrast: 10 })}>
                 明るさ・コントラスト
               </button>
@@ -838,6 +873,85 @@ export function App() {
                     </button>
                   ))}
                 </div>
+                {activeShapeData.shape === 'rounded-rect' && (
+                  <label>角丸 <b>{activeShapeData.cornerRadius ?? 0}px</b>
+                    <input
+                      type="range"
+                      min={0}
+                      max={shapeCornerRadiusMax}
+                      step={1}
+                      value={activeShapeData.cornerRadius ?? 0}
+                      onChange={(e) => updateShapeNumber('cornerRadius', Number(e.target.value))}
+                    />
+                  </label>
+                )}
+                {(activeShapeData.shape === 'polygon' || activeShapeData.shape === 'star') && (
+                  <label>辺数
+                    <input
+                      type="number"
+                      min={3}
+                      step={1}
+                      value={activeShapeData.sides ?? (activeShapeData.shape === 'star' ? 5 : 3)}
+                      onChange={(e) => updateShapeNumber('sides', Number(e.target.value))}
+                    />
+                  </label>
+                )}
+                {activeShapeData.shape === 'star' && (
+                  <label>内径比 <b>{(activeShapeData.innerRatio ?? 0.5).toFixed(2)}</b>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={activeShapeData.innerRatio ?? 0.5}
+                      onChange={(e) => updateShapeNumber('innerRatio', Number(e.target.value))}
+                    />
+                  </label>
+                )}
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(activeShapeFill)}
+                    onChange={(e) => s.updateActiveShapeLayer({
+                      style: { fill: e.target.checked ? activeShapeFill ?? s.primary : null },
+                    })}
+                  />
+                  塗り
+                </label>
+                {activeShapeFill && (
+                  <label>塗り色
+                    <input
+                      type="color"
+                      value={rgbaToHex(activeShapeFill)}
+                      onChange={(e) => s.updateActiveShapeLayer({ style: { fill: hexToRgba(e.target.value) } })}
+                    />
+                  </label>
+                )}
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(activeShapeStroke)}
+                    onChange={(e) => s.updateActiveShapeLayer({
+                      style: {
+                        stroke: e.target.checked
+                          ? activeShapeStroke ?? { color: s.primary, width: 2 }
+                          : null,
+                      },
+                    })}
+                  />
+                  線
+                </label>
+                {activeShapeStroke && (
+                  <label>線幅
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={activeShapeStroke.width}
+                      onChange={(e) => updateShapeStrokeWidth(Number(e.target.value))}
+                    />
+                  </label>
+                )}
               </div>
             )}
             <div className="layer-effects">

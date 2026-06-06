@@ -39,12 +39,10 @@ import {
   adjustBrightnessContrast,
   adjustHueSaturation,
   adjustLevels,
-  gaussianBlur,
   grayscale,
   invertColors,
   posterize,
   type BrightnessContrastOptions,
-  type GaussianBlurOptions,
   type HueSaturationOptions,
   type LevelsOptions,
   type PosterizeOptions,
@@ -54,11 +52,13 @@ import {
   threshold,
   type ThresholdOptions,
 } from '../filters';
+import { bloom, type BloomOptions } from '../filters/bloom';
 import { channelMixer, type ChannelMixerOptions } from '../filters/channel-mixer';
 import { clarity, type ClarityOptions } from '../filters/clarity';
 import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type GradientMapOptions } from '../filters/color-balance';
 import { emboss, sobelEdge } from '../filters/convolve';
 import { applyCurves, type CurvesOptions } from '../filters/curves';
+import { gaussianBlur, type GaussianBlurOptions } from '../filters/gaussian';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
 import { lensDistort, type LensDistortOptions } from '../filters/lens';
 import { motionBlur, type MotionBlurOptions, zoomBlur, type ZoomBlurOptions } from '../filters/motion-blur';
@@ -96,7 +96,9 @@ type Maskless<T> = Omit<T, 'mask'>;
 export type LiquifyMode = 'push' | 'bloat' | 'pinch';
 
 export interface FilterOptionMap {
-  blur: Partial<GaussianBlurOptions>;
+  blur: Partial<Maskless<GaussianBlurOptions>>;
+  gaussian: Partial<Maskless<GaussianBlurOptions>>;
+  bloom: Partial<Maskless<BloomOptions>>;
   'brightness-contrast': Partial<BrightnessContrastOptions>;
   invert: Record<string, never>;
   grayscale: Record<string, never>;
@@ -1664,8 +1666,32 @@ export const useStore = create<AppState>((set, get) => ({
 
     switch (name) {
       case 'blur': {
-        const filterOpts = opts as Partial<GaussianBlurOptions> | undefined;
-        gaussianBlur(layer.pixels, doc.width, doc.height, { radius: filterOpts?.radius ?? 4 }, selectionMask);
+        const filterOpts = opts as FilterOptionMap['blur'] | undefined;
+        gaussianBlur(layer.pixels, doc.width, doc.height, {
+          radius: 4,
+          ...filterOpts,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'gaussian': {
+        const filterOpts = opts as FilterOptionMap['gaussian'] | undefined;
+        gaussianBlur(layer.pixels, doc.width, doc.height, {
+          radius: 4,
+          ...filterOpts,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'bloom': {
+        const filterOpts = opts as FilterOptionMap['bloom'] | undefined;
+        bloom(layer.pixels, doc.width, doc.height, {
+          threshold: 200,
+          radius: 6,
+          intensity: 0.8,
+          ...filterOpts,
+          mask: selectionMask,
+        });
         break;
       }
       case 'brightness-contrast': {
