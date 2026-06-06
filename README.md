@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (266 tests)
+npm test           # vitest (309 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -54,6 +54,11 @@ npm run typecheck  # tsc --noEmit
 - **描画補助** — 対称・ミラー描画(`engine/symmetry` の水平/垂直/4分割/放射)、
   ブラシダイナミクス(`engine/brush-dynamics` の決定論的サイズ/不透明度ジッター・散布)、
   カラーパレットと配色ハーモニー生成(`color/palette` の補色/類似色/トライアド/テトラード)。
+- **アニメーション** — コマ撮りフレームのタイムライン管理(`anim/timeline` の追加/複製/並べ替え)と
+  オニオンスキン合成(前後フレームを低不透明度で重ねる)。
+- **ベクターパス** — 三次ベジェのパス平坦化と塗り/ストロークのラスタライズ(`vector/path`)。
+- **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
+  nearest/bilinear リサンプル(`tools/resample`)、繰り返しタイル塗りとシームレス化(`tools/pattern`)。
 - **ビューポート** — パン(Shift/中ボタン/手のひら) / ホイールズーム / 回転対応の変換行列。
 - **Undo/Redo** — 画素スナップショット方式のコマンド履歴(テキストレイヤーは textData も復元)。
 - **入出力** — 下記。
@@ -94,10 +99,13 @@ src/
   engine/     brush(ストローク) / effect-brush(ぼかし/覆い焼き等) /
               symmetry(対称描画) / brush-dynamics(ジッター/散布)
   tools/      fill / selection / transform / mask-paint(マスク手描き) /
-              layer-transform(反転・回転) / gradient / magic-wand / marquee(選択形状)
+              layer-transform(反転・回転) / gradient / magic-wand / marquee(選択形状) /
+              resample(拡縮) / pattern(タイル・シームレス)
   text/       font5x7(ビットマップフォント) / text-layer(再編集テキストデータ)
+  vector/     path(ベジェ・パスのラスタライズ)
+  anim/       timeline(フレーム・オニオンスキン)
   filters/    index(基本フィルター) / curves / color-balance / histogram /
-              convolve(エッジ/エンボス) / pixelate / noise
+              convolve(エッジ/エンボス) / pixelate / noise / quantize(減色)
   color/      color(RGB<->HSV / hex) / palette(スウォッチ・配色ハーモニー)
   io/         psd / clip / png / files(DLとピッカー)
   state/      store(zustand 統合点)
