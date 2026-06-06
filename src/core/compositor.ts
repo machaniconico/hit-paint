@@ -1,4 +1,11 @@
-import type { BlendMode, Layer, LayerId, PaintDocument } from '../types';
+import {
+  adjustBrightnessContrast,
+  adjustHueSaturation,
+  adjustLevels,
+  grayscale,
+  invertColors,
+} from '../filters';
+import type { AdjustmentSpec, BlendMode, Layer, LayerId, PaintDocument } from '../types';
 
 /** Per-channel blend function on normalized 0..1 backdrop(b) and source(s). */
 type BlendFn = (b: number, s: number) => number;
@@ -67,6 +74,11 @@ function renderLayers(
       continue;
     }
 
+    if (layer.kind === 'adjustment') {
+      applyAdjustmentLayer(out, doc.width, doc.height, layer);
+      continue;
+    }
+
     if (!layer.pixels) continue;
     compositeBuffer(
       out,
@@ -93,6 +105,74 @@ function renderGroup(doc: PaintDocument, group: Layer): Uint8ClampedArray {
   }
   renderLayers(doc, children, out);
   return out;
+}
+
+function applyAdjustmentLayer(
+  out: Uint8ClampedArray,
+  width: number,
+  height: number,
+  layer: Layer,
+): void {
+  if (!layer.adjustment) return;
+
+  const filtered = new Uint8ClampedArray(out);
+  applyAdjustmentFilter(filtered, width, height, layer.adjustment);
+  blendAdjustment(out, filtered, layer.opacity, layer.mask);
+}
+
+function applyAdjustmentFilter(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  adjustment: AdjustmentSpec,
+): void {
+  const opts = adjustment.opts ?? {};
+  switch (adjustment.type) {
+    case 'brightness-contrast':
+      adjustBrightnessContrast(pixels, width, height, {
+        brightness: opts.brightness ?? 0,
+        contrast: opts.contrast ?? 0,
+      });
+      break;
+    case 'invert':
+      invertColors(pixels, width, height);
+      break;
+    case 'grayscale':
+      grayscale(pixels, width, height);
+      break;
+    case 'hue-saturation':
+      adjustHueSaturation(pixels, width, height, {
+        hue: opts.hue ?? 0,
+        saturation: opts.saturation ?? 0,
+      });
+      break;
+    case 'levels':
+      adjustLevels(pixels, width, height, {
+        inBlack: opts.inBlack ?? 0,
+        inWhite: opts.inWhite ?? 255,
+        gamma: opts.gamma ?? 1,
+        outBlack: opts.outBlack ?? 0,
+        outWhite: opts.outWhite ?? 255,
+      });
+      break;
+  }
+}
+
+function blendAdjustment(
+  out: Uint8ClampedArray,
+  filtered: Uint8ClampedArray,
+  opacity: number,
+  mask?: Uint8ClampedArray,
+): void {
+  for (let i = 0, p = 0; i < out.length; i += 4, p++) {
+    const coverage = opacity * (mask ? mask[p] / 255 : 1);
+    if (coverage <= 0) continue;
+
+    for (let channel = 0; channel < 4; channel++) {
+      const original = out[i + channel];
+      out[i + channel] = original + (filtered[i + channel] - original) * coverage;
+    }
+  }
 }
 
 function findClipMask(layers: Layer[], layerIndex: number): Uint8ClampedArray | null {

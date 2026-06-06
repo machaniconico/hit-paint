@@ -56,7 +56,18 @@ export const BLEND_MODES: BlendMode[] = [
 
 export type LayerId = string;
 
-export type LayerKind = 'raster' | 'group';
+export type LayerKind = 'raster' | 'group' | 'adjustment';
+
+/**
+ * Non-destructive filter settings for an adjustment layer.
+ * The filter is applied to the already-composited backdrop below the layer;
+ * opts stores filter-specific numeric controls such as brightness/contrast,
+ * hue/saturation, or levels input/output/gamma values.
+ */
+export interface AdjustmentSpec {
+  type: 'brightness-contrast' | 'invert' | 'grayscale' | 'hue-saturation' | 'levels';
+  opts?: Record<string, number>;
+}
 
 /**
  * A raster layer holds a full-document-sized RGBA pixel buffer.
@@ -74,8 +85,10 @@ export interface Layer {
   locked: boolean;
   /** Clip to the layer directly below (CLIP/PSD "clipping mask"). */
   clipping: boolean;
-  /** RGBA pixels, length = width*height*4. Undefined for groups. */
+  /** RGBA pixels, length = width*height*4. Undefined for groups and adjustment layers. */
   pixels?: Uint8ClampedArray;
+  /** Non-destructive filter applied by kind==='adjustment'. */
+  adjustment?: AdjustmentSpec;
   /** 8-bit visibility mask, length = width*height (0 = hide, 255 = show). */
   mask?: Uint8ClampedArray;
   /** child layer ids, for kind==='group' */

@@ -1,4 +1,4 @@
-import type { Layer, LayerId, PaintDocument, RGBA } from '../types';
+import type { AdjustmentSpec, Layer, LayerId, PaintDocument, RGBA } from '../types';
 
 let _counter = 0;
 /** Deterministic-ish unique id (avoids Math.random for testability). */
@@ -52,6 +52,24 @@ export function createGroupLayer(name = 'グループ', children: LayerId[] = []
     locked: false,
     clipping: false,
     children,
+  };
+}
+
+export function createAdjustmentLayer(
+  type: AdjustmentSpec['type'],
+  opts?: Record<string, number>,
+  name = '調整レイヤー',
+): Layer {
+  return {
+    id: uid('adjustment'),
+    name,
+    kind: 'adjustment',
+    visible: true,
+    opacity: 1,
+    blendMode: 'normal',
+    locked: false,
+    clipping: false,
+    adjustment: { type, opts },
   };
 }
 
