@@ -72,6 +72,7 @@ body {
 .mini:disabled { opacity: 0.45; cursor: default; }
 .filter-grid, .selection-grid, .adjustment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini { min-height: 28px; padding: 4px 6px; }
+.filter-grid .wide { grid-column: 1 / -1; }
 .selection-grid { grid-template-columns: repeat(3, 1fr); }
 .adjustment-grid { grid-template-columns: 1fr; }
 

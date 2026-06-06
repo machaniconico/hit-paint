@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import initSqlJs from 'sql.js';
 
-import { createAdjustmentLayer, createDocument, createGroupLayer } from '../src/core/document';
+import {
+  createAdjustmentLayer,
+  createDocument,
+  createGroupLayer,
+  createRasterLayer,
+  createTextLayer,
+} from '../src/core/document';
 import { exportCLIP, importCLIP } from '../src/io/clip';
+import { createTextLayerData } from '../src/text/text-layer';
 
 /** SQLite file header magic: "SQLite format 3\0" (16 bytes). */
 const SQLITE_MAGIC = 'SQLite format 3\x00';
@@ -46,6 +53,140 @@ async function createLegacyClipWithoutKindOrAdjustment(): Promise<ArrayBuffer> {
         null,
       ],
     );
+    const bytes = db.export();
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  } finally {
+    db.close();
+  }
+}
+
+async function createLegacyClipWithoutTextData(): Promise<ArrayBuffer> {
+  const SQL = await initSqlJs({
+    locateFile: () => path.join(process.cwd(), 'node_modules/sql.js/dist/sql-wasm.wasm'),
+  });
+  const db = new SQL.Database();
+  try {
+    db.run('CREATE TABLE hitpaint_meta (width INT, height INT, dpi REAL, name TEXT);');
+    db.run(
+      'CREATE TABLE hitpaint_layers (' +
+        'idx INT, id TEXT, name TEXT, kind TEXT, visible INT, opacity REAL, blend TEXT, ' +
+        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT, adjustment TEXT);',
+    );
+    db.run('INSERT INTO hitpaint_meta (width, height, dpi, name) VALUES (?, ?, ?, ?);', [
+      2,
+      2,
+      72,
+      'legacy textData',
+    ]);
+    db.run(
+      'INSERT INTO hitpaint_layers ' +
+        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      [
+        0,
+        'legacy-raster',
+        'legacy raster',
+        'raster',
+        1,
+        1,
+        'normal',
+        0,
+        0,
+        2,
+        2,
+        new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+        new Uint8Array(0),
+        null,
+        null,
+      ],
+    );
+    db.run(
+      'INSERT INTO hitpaint_layers ' +
+        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      [
+        1,
+        'legacy-group',
+        'legacy group',
+        'group',
+        1,
+        1,
+        'normal',
+        0,
+        0,
+        2,
+        2,
+        new Uint8Array(0),
+        new Uint8Array(0),
+        JSON.stringify(['legacy-raster']),
+        null,
+      ],
+    );
+    const bytes = db.export();
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  } finally {
+    db.close();
+  }
+}
+
+async function createClipWithInvalidTextData(): Promise<ArrayBuffer> {
+  const SQL = await initSqlJs({
+    locateFile: () => path.join(process.cwd(), 'node_modules/sql.js/dist/sql-wasm.wasm'),
+  });
+  const db = new SQL.Database();
+  try {
+    db.run('CREATE TABLE hitpaint_meta (width INT, height INT, dpi REAL, name TEXT);');
+    db.run(
+      'CREATE TABLE hitpaint_layers (' +
+        'idx INT, id TEXT, name TEXT, kind TEXT, visible INT, opacity REAL, blend TEXT, ' +
+        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT, adjustment TEXT, textData TEXT);',
+    );
+    db.run('INSERT INTO hitpaint_meta (width, height, dpi, name) VALUES (?, ?, ?, ?);', [
+      1,
+      1,
+      72,
+      'invalid textData',
+    ]);
+    const insert =
+      'INSERT INTO hitpaint_layers ' +
+      '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment, textData) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);';
+    db.run(insert, [
+      0,
+      'bad-json',
+      'bad json',
+      'raster',
+      1,
+      1,
+      'normal',
+      0,
+      0,
+      1,
+      1,
+      new Uint8Array([0, 0, 0, 0]),
+      new Uint8Array(0),
+      null,
+      null,
+      '{bad json',
+    ]);
+    db.run(insert, [
+      1,
+      'bad-shape',
+      'bad shape',
+      'raster',
+      1,
+      1,
+      'normal',
+      0,
+      0,
+      1,
+      1,
+      new Uint8Array([0, 0, 0, 0]),
+      new Uint8Array(0),
+      null,
+      null,
+      JSON.stringify({ text: 'oops', x: 0, y: Number.POSITIVE_INFINITY, color: { r: 0, g: 0, b: 0, a: 255 } }),
+    ]);
     const bytes = db.export();
     return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   } finally {
@@ -164,6 +305,85 @@ describe('CLIP (.clip) round-trip', () => {
     expect(importedAdjustment?.adjustment?.opts?.brightness).toBeCloseTo(0.125, 5);
     expect(importedAdjustment?.adjustment?.opts?.contrast).toBeCloseTo(-0.5, 5);
     expect(importedAdjustment?.pixels).toBeUndefined();
+  });
+
+  it('round-trips editable text layer data', async () => {
+    const doc = createDocument(16, 12);
+    const textData = createTextLayerData({
+      text: 'HIT',
+      x: 3,
+      y: 4,
+      scale: 2.5,
+      color: { r: 12, g: 34, b: 56, a: 200 },
+    });
+    const textLayer = createTextLayer(doc.width, doc.height, textData, 'editable text');
+    doc.layers.push(textLayer);
+    doc.activeLayerId = textLayer.id;
+
+    const buffer = await exportCLIP(doc);
+
+    const SQL = await initSqlJs({
+      locateFile: () => path.join(process.cwd(), 'node_modules/sql.js/dist/sql-wasm.wasm'),
+    });
+    const db = new SQL.Database(new Uint8Array(buffer));
+    try {
+      const columns = db.exec('PRAGMA table_info(hitpaint_layers);');
+      expect(columns[0].values.some((row) => row[1] === 'textData' && row[2] === 'TEXT')).toBe(true);
+      const stmt = db.prepare('SELECT textData FROM hitpaint_layers WHERE id = ? LIMIT 1;');
+      try {
+        stmt.bind([textLayer.id]);
+        expect(stmt.step()).toBe(true);
+        const storedTextData = stmt.get()[0];
+        expect(typeof storedTextData).toBe('string');
+        expect(JSON.parse(storedTextData as string)).toEqual(textData);
+      } finally {
+        stmt.free();
+      }
+    } finally {
+      db.close();
+    }
+
+    const result = await importCLIP(buffer);
+    const importedTextLayer = result.doc.layers.find((layer) => layer.id === textLayer.id);
+    expect(importedTextLayer?.textData?.text).toBe('HIT');
+    expect(importedTextLayer?.textData?.x).toBe(3);
+    expect(importedTextLayer?.textData?.y).toBe(4);
+    expect(importedTextLayer?.textData?.scale).toBe(2.5);
+    expect(importedTextLayer?.textData?.color).toEqual({ r: 12, g: 34, b: 56, a: 200 });
+  });
+
+  it('keeps textData undefined for non-text raster layers', async () => {
+    const doc = createDocument(3, 3);
+    const plain = createRasterLayer(doc.width, doc.height, 'plain raster');
+    doc.layers.push(plain);
+
+    const buffer = await exportCLIP(doc);
+    const result = await importCLIP(buffer);
+
+    const importedPlain = result.doc.layers.find((layer) => layer.id === plain.id);
+    expect(importedPlain?.textData).toBeUndefined();
+  });
+
+  it('ignores invalid textData values without dropping layers', async () => {
+    const buffer = await createClipWithInvalidTextData();
+    const result = await importCLIP(buffer);
+
+    expect(result.doc.layers).toHaveLength(2);
+    expect(result.doc.layers[0].id).toBe('bad-json');
+    expect(result.doc.layers[1].id).toBe('bad-shape');
+    expect(result.doc.layers[0].textData).toBeUndefined();
+    expect(result.doc.layers[1].textData).toBeUndefined();
+  });
+
+  it('imports legacy HIT Paint clips without a textData column', async () => {
+    const buffer = await createLegacyClipWithoutTextData();
+    const result = await importCLIP(buffer);
+
+    expect(result.doc.layers).toHaveLength(2);
+    expect(result.doc.layers[0].id).toBe('legacy-raster');
+    expect(result.doc.layers[0].textData).toBeUndefined();
+    expect(result.doc.layers[1].id).toBe('legacy-group');
+    expect(result.doc.layers[1].children).toEqual(['legacy-raster']);
   });
 
   it('imports legacy HIT Paint clips without kind or adjustment columns', async () => {

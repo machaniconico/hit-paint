@@ -32,7 +32,9 @@ import type {
   ImportResult,
   Layer,
   PaintDocument,
+  RGBA,
 } from '../types';
+import type { TextLayerData } from '../text/text-layer';
 import { BLEND_MODES } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -91,7 +93,7 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     db.run(
       'CREATE TABLE hitpaint_layers (' +
         'idx INT, id TEXT, name TEXT, kind TEXT, visible INT, opacity REAL, blend TEXT, ' +
-        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT, adjustment TEXT);',
+        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT, adjustment TEXT, textData TEXT);',
     );
 
     // Meta (single row) --------------------------------------------------
@@ -105,8 +107,8 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     // Layers (in document order, bottom -> top) --------------------------
     const insertLayer = db.prepare(
       'INSERT INTO hitpaint_layers ' +
-        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment, textData) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
     );
     try {
       doc.layers.forEach((layer, index) => {
@@ -139,6 +141,7 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
           mask,
           layer.children ? JSON.stringify(layer.children) : null,
           layer.kind === 'adjustment' && layer.adjustment ? JSON.stringify(layer.adjustment) : null,
+          layer.textData ? JSON.stringify(layer.textData) : null,
         ]);
       });
     } finally {
@@ -224,6 +227,51 @@ function parseAdjustment(value: SqlValue): AdjustmentSpec | null {
   }
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function parseTextColor(value: unknown): RGBA | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { r, g, b, a } = value as { r?: unknown; g?: unknown; b?: unknown; a?: unknown };
+  if (!isFiniteNumber(r) || !isFiniteNumber(g) || !isFiniteNumber(b) || !isFiniteNumber(a)) {
+    return null;
+  }
+  return { r, g, b, a };
+}
+
+function parseTextData(value: SqlValue): TextLayerData | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const { text, x, y, color, scale, letterSpacing } = parsed as {
+      text?: unknown;
+      x?: unknown;
+      y?: unknown;
+      color?: unknown;
+      scale?: unknown;
+      letterSpacing?: unknown;
+    };
+    const parsedColor = parseTextColor(color);
+    if (typeof text !== 'string' || !isFiniteNumber(x) || !isFiniteNumber(y) || !parsedColor) {
+      return undefined;
+    }
+    const textData: TextLayerData = { text, x, y, color: parsedColor };
+    if (scale !== undefined) {
+      if (!isFiniteNumber(scale)) return undefined;
+      textData.scale = scale;
+    }
+    if (letterSpacing !== undefined) {
+      if (!isFiniteNumber(letterSpacing)) return undefined;
+      textData.letterSpacing = letterSpacing;
+    }
+    return textData;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read the names of all user tables in the database. */
 function listTables(db: Database): Set<string> {
   const names = new Set<string>();
@@ -274,6 +322,7 @@ function importHitPaint(db: Database): ImportResult {
   const hasMaskColumn = tableHasColumn(db, 'hitpaint_layers', 'mask');
   const hasChildrenColumn = tableHasColumn(db, 'hitpaint_layers', 'children');
   const hasAdjustmentColumn = tableHasColumn(db, 'hitpaint_layers', 'adjustment');
+  const hasTextDataColumn = tableHasColumn(db, 'hitpaint_layers', 'textData');
   const layerRes = db.exec(
     'SELECT id, name, ' +
       (hasKindColumn ? 'kind' : "'raster' AS kind") +
@@ -283,6 +332,8 @@ function importHitPaint(db: Database): ImportResult {
       (hasChildrenColumn ? 'children' : 'NULL AS children') +
       ', ' +
       (hasAdjustmentColumn ? 'adjustment' : 'NULL AS adjustment') +
+      ', ' +
+      (hasTextDataColumn ? 'textData' : 'NULL AS textData') +
       ' FROM hitpaint_layers ORDER BY idx ASC;',
   );
   if (layerRes.length > 0) {
@@ -302,6 +353,7 @@ function importHitPaint(db: Database): ImportResult {
         lMask,
         lChildren,
         lAdjustment,
+        lTextData,
       ] = row;
       const adjustment = parseAdjustment(lAdjustment);
       const kind = lKind === 'group' ? 'group' : lKind === 'adjustment' && adjustment ? 'adjustment' : 'raster';
@@ -324,6 +376,10 @@ function importHitPaint(db: Database): ImportResult {
         }
         if (lKind === 'adjustment' && !adjustment) {
           warnings.push(`調整レイヤー「${layer.name}」の設定が不正なため、通常レイヤーとして読み込みました。`);
+        }
+        const textData = parseTextData(lTextData);
+        if (textData) {
+          layer.textData = textData;
         }
       } else if (kind === 'group') {
         layer.children = parseChildren(lChildren);

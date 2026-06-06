@@ -38,27 +38,39 @@ import {
   threshold,
   type ThresholdOptions,
 } from '../filters';
+import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type GradientMapOptions } from '../filters/color-balance';
+import { emboss, sobelEdge } from '../filters/convolve';
+import { applyCurves, type CurvesOptions } from '../filters/curves';
+import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
+import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
+import { pixelate, type PixelateOptions } from '../filters/pixelate';
 
-export type FilterName =
-  | 'blur'
-  | 'brightness-contrast'
-  | 'invert'
-  | 'grayscale'
-  | 'hue-saturation'
-  | 'levels'
-  | 'sharpen'
-  | 'threshold'
-  | 'posterize'
-  | 'sepia';
+type Maskless<T> = Omit<T, 'mask'>;
 
-export type FilterOptions =
-  | Partial<GaussianBlurOptions>
-  | Partial<BrightnessContrastOptions>
-  | Partial<HueSaturationOptions>
-  | Partial<LevelsOptions>
-  | Partial<SharpenOptions>
-  | Partial<ThresholdOptions>
-  | Partial<PosterizeOptions>;
+export interface FilterOptionMap {
+  blur: Partial<GaussianBlurOptions>;
+  'brightness-contrast': Partial<BrightnessContrastOptions>;
+  invert: Record<string, never>;
+  grayscale: Record<string, never>;
+  'hue-saturation': Partial<HueSaturationOptions>;
+  levels: Partial<LevelsOptions>;
+  sharpen: Partial<SharpenOptions>;
+  threshold: Partial<ThresholdOptions>;
+  posterize: Partial<PosterizeOptions>;
+  sepia: Record<string, never>;
+  'auto-levels': Partial<Maskless<AutoToneOptions>>;
+  'auto-contrast': Partial<Maskless<AutoToneOptions>>;
+  'sobel-edge': Record<string, never>;
+  emboss: Record<string, never>;
+  mosaic: Partial<Maskless<PixelateOptions>>;
+  'ordered-dither': Partial<Maskless<OrderedDitherOptions>>;
+  'color-balance': Partial<Maskless<ColorBalanceOptions>>;
+  'gradient-map': Partial<Maskless<GradientMapOptions>>;
+  curves: Partial<Maskless<CurvesOptions>>;
+}
+
+export type FilterName = keyof FilterOptionMap;
+export type FilterOptions = FilterOptionMap[FilterName];
 
 /** Transient, non-reactive stroke state (kept out of the reactive store). */
 interface StrokeContext {
@@ -188,7 +200,7 @@ export interface AppState {
   removeLayerFromGroupAction: (layerId: LayerId, groupId: LayerId) => void;
 
   // filters
-  applyFilter: (name: FilterName, opts?: FilterOptions) => void;
+  applyFilter: <T extends FilterName>(name: T, opts?: FilterOptionMap[T]) => void;
 
   // history
   undo: () => void;
@@ -628,6 +640,80 @@ export const useStore = create<AppState>((set, get) => ({
       case 'sepia':
         sepia(layer.pixels, doc.width, doc.height, selectionMask);
         break;
+      case 'auto-levels': {
+        const filterOpts = opts as FilterOptionMap['auto-levels'] | undefined;
+        autoLevels(layer.pixels, doc.width, doc.height, {
+          clipPercent: filterOpts?.clipPercent ?? 0,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'auto-contrast': {
+        const filterOpts = opts as FilterOptionMap['auto-contrast'] | undefined;
+        autoContrast(layer.pixels, doc.width, doc.height, {
+          clipPercent: filterOpts?.clipPercent ?? 0,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'sobel-edge':
+        sobelEdge(layer.pixels, doc.width, doc.height, { mask: selectionMask });
+        break;
+      case 'emboss':
+        emboss(layer.pixels, doc.width, doc.height, { mask: selectionMask });
+        break;
+      case 'mosaic': {
+        const filterOpts = opts as FilterOptionMap['mosaic'] | undefined;
+        pixelate(layer.pixels, doc.width, doc.height, {
+          blockSize: filterOpts?.blockSize ?? 4,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'ordered-dither': {
+        const filterOpts = opts as FilterOptionMap['ordered-dither'] | undefined;
+        orderedDither(layer.pixels, doc.width, doc.height, {
+          levels: filterOpts?.levels ?? 4,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'color-balance': {
+        const filterOpts = opts as FilterOptionMap['color-balance'] | undefined;
+        adjustColorBalance(layer.pixels, doc.width, doc.height, {
+          shadows: filterOpts?.shadows,
+          midtones: filterOpts?.midtones ?? [8, 0, -8],
+          highlights: filterOpts?.highlights,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'gradient-map': {
+        const filterOpts = opts as FilterOptionMap['gradient-map'] | undefined;
+        gradientMap(layer.pixels, doc.width, doc.height, {
+          stops: filterOpts?.stops ?? [
+            { t: 0, color: { r: 24, g: 35, b: 80, a: 255 } },
+            { t: 1, color: { r: 255, g: 236, b: 184, a: 255 } },
+          ],
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'curves': {
+        const filterOpts = opts as FilterOptionMap['curves'] | undefined;
+        applyCurves(layer.pixels, doc.width, doc.height, {
+          rgb: filterOpts?.rgb ?? [
+            { x: 0, y: 0 },
+            { x: 128, y: 148 },
+            { x: 255, y: 255 },
+          ],
+          r: filterOpts?.r,
+          g: filterOpts?.g,
+          b: filterOpts?.b,
+          mask: selectionMask,
+        });
+        break;
+      }
     }
 
     if (!pixelsEqual(before, layer.pixels)) {

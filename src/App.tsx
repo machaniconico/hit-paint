@@ -54,6 +54,7 @@ function screenToDoc(
 export function App() {
   const s = useStore();
   const [blurRadius, setBlurRadius] = useState(4);
+  const [mosaicBlockSize, setMosaicBlockSize] = useState(4);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
   const activeTextData = activeLayer?.textData;
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
@@ -235,6 +236,10 @@ export function App() {
               <input type="range" min={1} max={24} value={blurRadius}
                 onChange={(e) => setBlurRadius(+e.target.value)} />
             </label>
+            <label>モザイクサイズ <b>{mosaicBlockSize}px</b>
+              <input type="range" min={2} max={32} value={mosaicBlockSize}
+                onChange={(e) => setMosaicBlockSize(+e.target.value)} />
+            </label>
             <div className="filter-grid">
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('blur', { radius: blurRadius })}>ぼかし</button>
@@ -254,6 +259,41 @@ export function App() {
                 onClick={() => s.applyFilter('posterize', { levels: 4 })}>ポスタライズ</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('sepia')}>セピア</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('auto-levels')}>オートレベル</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('auto-contrast')}>オートコントラスト</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('sobel-edge')}>エッジ抽出</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('emboss')}>エンボス</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('mosaic', { blockSize: mosaicBlockSize })}>モザイク</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('ordered-dither', { levels: 4 })}>ディザ</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('color-balance', { midtones: [8, 0, -8] })}>
+                カラーバランス
+              </button>
+              <button className="mini wide" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('gradient-map', {
+                  stops: [
+                    { t: 0, color: { r: 24, g: 35, b: 80, a: 255 } },
+                    { t: 1, color: { r: 255, g: 236, b: 184, a: 255 } },
+                  ],
+                })}>
+                グラデーションマップ
+              </button>
+              <button className="mini wide" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('curves', {
+                  rgb: [
+                    { x: 0, y: 0 },
+                    { x: 128, y: 148 },
+                    { x: 255, y: 255 },
+                  ],
+                })}>
+                トーンカーブ
+              </button>
             </div>
           </section>
 
