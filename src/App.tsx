@@ -612,6 +612,17 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('halftone', { cellSize: 6 })}>ハーフトーン</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('duotone', {
+                  shadow: { r: 20, g: 20, b: 60, a: 255 },
+                  highlight: { r: 255, g: 240, b: 200, a: 255 },
+                })}>デュオトーン</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('chromakey', {
+                  key: { r: 0, g: 255, b: 0, a: 255 },
+                  tolerance: 80,
+                  softness: 40,
+                })}>クロマキー</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('quantize', { maxColors: quantizeMaxColors })}>減色</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('color-balance', { midtones: [8, 0, -8] })}>
@@ -860,6 +871,8 @@ export function App() {
                 <button className="mini" onClick={() => s.addVectorLayer()}>ベクターレイヤー追加</button>
                 <button className="mini" disabled={!canFilterActive}
                   onClick={() => s.fillWithNoise()}>ノイズ生成(Perlin)</button>
+                <button className="mini" disabled={!canFilterActive}
+                  onClick={() => s.fillWithCellular()}>セルラーノイズ</button>
                 <button className="mini" disabled={!canMaskActive || !activeLayer}
                   onClick={() => activeLayer && s.addLayerMask(activeLayer.id)}>マスク追加</button>
                 <button className="mini" disabled={!activeLayer?.mask}

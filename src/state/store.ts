@@ -55,10 +55,12 @@ import {
 import { bloom, type BloomOptions } from '../filters/bloom';
 import { channelMixer, type ChannelMixerOptions } from '../filters/channel-mixer';
 import { chromaticAberration, type ChromaticOptions } from '../filters/chromatic';
+import { chromaKey, type ChromaKeyOptions } from '../filters/chromakey';
 import { clarity, type ClarityOptions } from '../filters/clarity';
 import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type GradientMapOptions } from '../filters/color-balance';
 import { emboss, sobelEdge } from '../filters/convolve';
 import { applyCurves, type CurvesOptions } from '../filters/curves';
+import { duotone, type DuotoneOptions } from '../filters/duotone';
 import { gaussianBlur, type GaussianBlurOptions } from '../filters/gaussian';
 import { halftone, type HalftoneOptions } from '../filters/halftone';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
@@ -74,6 +76,7 @@ import { unsharpMask } from '../filters/unsharp';
 import { vignette, type VignetteOptions } from '../filters/vignette';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
+import { worleyField, worleyToGrayscale } from '../engine/cellular';
 import { generateNoiseField, noiseToGrayscale } from '../engine/perlin';
 import { perspectiveWarp, type Quad } from '../tools/perspective';
 import {
@@ -98,6 +101,11 @@ import {
 } from '../core/layer-effects';
 
 type Maskless<T> = Omit<T, 'mask'>;
+type DuotoneColor = DuotoneOptions['shadow'] | RGBA;
+type StoreDuotoneOptions = Omit<DuotoneOptions, 'shadow' | 'highlight'> & {
+  shadow: DuotoneColor;
+  highlight: DuotoneColor;
+};
 export type LiquifyMode = 'push' | 'bloat' | 'pinch';
 
 export interface FilterOptionMap {
@@ -136,6 +144,8 @@ export interface FilterOptionMap {
   halftone: HalftoneOptions;
   chromatic: ChromaticOptions;
   oil: OilPaintOptions;
+  duotone: StoreDuotoneOptions;
+  chromakey: ChromaKeyOptions;
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -209,6 +219,11 @@ function defaultDynamics(): DynamicsConfig {
     scatter: 0,
     seed: 0,
   };
+}
+
+function duotoneTuple(color: DuotoneColor): DuotoneOptions['shadow'] {
+  if (Array.isArray(color)) return color as DuotoneOptions['shadow'];
+  return [color.r, color.g, color.b, color.a];
 }
 
 function dabFalloff(d: number, hardness: number, pixel: boolean): number {
@@ -720,6 +735,7 @@ export interface AppState {
   // filters
   applyFilter: <T extends FilterName>(name: T, opts?: FilterOptionMap[T]) => void;
   fillWithNoise: (opts?: { scale?: number; seed?: number }) => void;
+  fillWithCellular: (opts?: { cellSize?: number; seed?: number }) => void;
   applyLayerEffect: <T extends LayerEffectKind>(kind: T, opts?: LayerEffectOptionMap[T]) => void;
 
   // history
@@ -1944,6 +1960,25 @@ export const useStore = create<AppState>((set, get) => ({
         });
         break;
       }
+      case 'duotone': {
+        const filterOpts = opts as FilterOptionMap['duotone'] | undefined;
+        duotone(layer.pixels, doc.width, doc.height, {
+          shadow: duotoneTuple(filterOpts?.shadow ?? { r: 20, g: 20, b: 60, a: 255 }),
+          highlight: duotoneTuple(filterOpts?.highlight ?? { r: 255, g: 240, b: 200, a: 255 }),
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'chromakey': {
+        const filterOpts = opts as FilterOptionMap['chromakey'] | undefined;
+        chromaKey(layer.pixels, doc.width, doc.height, {
+          key: filterOpts?.key ?? { r: 0, g: 255, b: 0, a: 255 },
+          tolerance: filterOpts?.tolerance ?? 80,
+          softness: filterOpts?.softness ?? 40,
+          mask: selectionMask,
+        });
+        break;
+      }
       case 'chromatic': {
         const filterOpts = opts as FilterOptionMap['chromatic'] | undefined;
         chromaticAberration(layer.pixels, doc.width, doc.height, {
@@ -1984,6 +2019,24 @@ export const useStore = create<AppState>((set, get) => ({
 
     if (!pixelsEqual(before, layer.pixels)) {
       get().commitEdit('ノイズ生成', layer.id, before);
+    }
+  },
+  fillWithCellular: (opts) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const next = worleyToGrayscale(worleyField({
+      width: doc.width,
+      height: doc.height,
+      cellSize: opts?.cellSize ?? 32,
+      seed: opts?.seed ?? 1,
+    }), doc.width, doc.height);
+    layer.pixels.set(next);
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('セルラーノイズ生成', layer.id, before);
     }
   },
 
