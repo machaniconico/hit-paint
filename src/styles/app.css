@@ -86,6 +86,7 @@ body {
   min-height: 28px; padding: 4px 6px;
 }
 .filter-grid .wide { grid-column: 1 / -1; }
+.filter-control-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .filters label b { color: var(--accent); font-weight: 600; }
 .selection-grid { grid-template-columns: repeat(5, 1fr); }
 .align-grid { grid-template-columns: repeat(3, 1fr); }

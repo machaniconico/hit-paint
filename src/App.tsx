@@ -106,6 +106,10 @@ export function App() {
   const s = useStore();
   const [penStrokeWidth, setPenStrokeWidth] = useState(2);
   const [blurRadius, setBlurRadius] = useState(4);
+  const [gammaValue, setGammaValue] = useState(1.5);
+  const [motionBlurAngle, setMotionBlurAngle] = useState(0);
+  const [motionBlurDistance, setMotionBlurDistance] = useState(8);
+  const [zoomBlurStrength, setZoomBlurStrength] = useState(0.35);
   const [mosaicBlockSize, setMosaicBlockSize] = useState(4);
   const [quantizeMaxColors, setQuantizeMaxColors] = useState(16);
   const [canvasW, setCanvasW] = useState(s.doc.width);
@@ -456,6 +460,24 @@ export function App() {
               <input type="range" min={1} max={24} value={blurRadius}
                 onChange={(e) => setBlurRadius(+e.target.value)} />
             </label>
+            <label>ガンマ <b>{gammaValue.toFixed(1)}</b>
+              <input type="range" min={0.2} max={4} step={0.1} value={gammaValue}
+                onChange={(e) => setGammaValue(+e.target.value)} />
+            </label>
+            <div className="filter-control-row">
+              <label>モーション角度 <b>{motionBlurAngle}°</b>
+                <input type="range" min={-180} max={180} step={1} value={motionBlurAngle}
+                  onChange={(e) => setMotionBlurAngle(+e.target.value)} />
+              </label>
+              <label>距離 <b>{motionBlurDistance}px</b>
+                <input type="range" min={1} max={32} step={1} value={motionBlurDistance}
+                  onChange={(e) => setMotionBlurDistance(+e.target.value)} />
+              </label>
+            </div>
+            <label>放射強度 <b>{zoomBlurStrength.toFixed(2)}</b>
+              <input type="range" min={0.05} max={1} step={0.05} value={zoomBlurStrength}
+                onChange={(e) => setZoomBlurStrength(+e.target.value)} />
+            </label>
             <label>モザイクサイズ <b>{mosaicBlockSize}px</b>
               <input type="range" min={2} max={32} value={mosaicBlockSize}
                 onChange={(e) => setMosaicBlockSize(+e.target.value)} />
@@ -487,6 +509,16 @@ export function App() {
                 onClick={() => s.applyFilter('auto-levels')}>オートレベル</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('auto-contrast')}>オートコントラスト</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('equalize')}>ヒストグラム等化</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('gamma', { gamma: gammaValue })}>ガンマ補正</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('motion-blur', { angle: motionBlurAngle, distance: motionBlurDistance })}>
+                モーションブラー
+              </button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('zoom-blur', { strength: zoomBlurStrength })}>放射ブラー</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('sobel-edge')}>エッジ抽出</button>
               <button className="mini" disabled={!canFilterActive}

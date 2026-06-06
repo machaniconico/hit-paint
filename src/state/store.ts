@@ -49,9 +49,11 @@ import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type Gradien
 import { emboss, sobelEdge } from '../filters/convolve';
 import { applyCurves, type CurvesOptions } from '../filters/curves';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
+import { motionBlur, type MotionBlurOptions, zoomBlur, type ZoomBlurOptions } from '../filters/motion-blur';
 import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
 import { applyQuantize } from '../filters/quantize';
+import { adjustGamma, equalizeHistogram } from '../filters/tone';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import {
@@ -94,6 +96,10 @@ export interface FilterOptionMap {
   'gradient-map': Partial<Maskless<GradientMapOptions>>;
   curves: Partial<Maskless<CurvesOptions>>;
   quantize: { maxColors: number };
+  equalize: Record<string, never>;
+  gamma: { gamma: number };
+  'motion-blur': MotionBlurOptions;
+  'zoom-blur': Pick<ZoomBlurOptions, 'strength'>;
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -1505,6 +1511,33 @@ export const useStore = create<AppState>((set, get) => ({
           b: filterOpts?.b,
           mask: selectionMask,
         });
+        break;
+      }
+      case 'equalize':
+        equalizeHistogram(layer.pixels, doc.width, doc.height, selectionMask);
+        break;
+      case 'gamma': {
+        const filterOpts = opts as FilterOptionMap['gamma'] | undefined;
+        adjustGamma(layer.pixels, doc.width, doc.height, {
+          gamma: filterOpts?.gamma ?? 1.5,
+        }, selectionMask);
+        break;
+      }
+      case 'motion-blur': {
+        const filterOpts = opts as FilterOptionMap['motion-blur'] | undefined;
+        motionBlur(layer.pixels, doc.width, doc.height, {
+          angle: filterOpts?.angle ?? 0,
+          distance: filterOpts?.distance ?? 8,
+        }, selectionMask);
+        break;
+      }
+      case 'zoom-blur': {
+        const filterOpts = opts as FilterOptionMap['zoom-blur'] | undefined;
+        zoomBlur(layer.pixels, doc.width, doc.height, {
+          cx: (doc.width - 1) / 2,
+          cy: (doc.height - 1) / 2,
+          strength: filterOpts?.strength ?? 0.35,
+        }, selectionMask);
         break;
       }
     }
