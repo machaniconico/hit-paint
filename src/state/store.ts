@@ -50,6 +50,7 @@ import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type Gradien
 import { emboss, sobelEdge } from '../filters/convolve';
 import { applyCurves, type CurvesOptions } from '../filters/curves';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
+import { lensDistort, type LensDistortOptions } from '../filters/lens';
 import { motionBlur, type MotionBlurOptions, zoomBlur, type ZoomBlurOptions } from '../filters/motion-blur';
 import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
@@ -57,6 +58,7 @@ import { applyQuantize } from '../filters/quantize';
 import { replaceColor } from '../filters/replace-color';
 import { adjustGamma, equalizeHistogram } from '../filters/tone';
 import { unsharpMask } from '../filters/unsharp';
+import { vignette, type VignetteOptions } from '../filters/vignette';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import {
@@ -106,6 +108,8 @@ export interface FilterOptionMap {
   'motion-blur': MotionBlurOptions;
   'zoom-blur': Pick<ZoomBlurOptions, 'strength'>;
   'replace-color': { from: RGBA; to: RGBA; tolerance: number; fuzziness?: number };
+  lens: LensDistortOptions;
+  vignette: VignetteOptions;
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -1657,6 +1661,18 @@ export const useStore = create<AppState>((set, get) => ({
           tolerance: filterOpts?.tolerance ?? get().fillTolerance,
           fuzziness: filterOpts?.fuzziness,
         }, selectionMask);
+        break;
+      }
+      case 'lens': {
+        const filterOpts = opts as FilterOptionMap['lens'] | undefined;
+        const lensOpts = { amount: 0.3, ...filterOpts } as LensDistortOptions;
+        lensDistort(layer.pixels, doc.width, doc.height, lensOpts, selectionMask ?? undefined);
+        break;
+      }
+      case 'vignette': {
+        const filterOpts = opts as FilterOptionMap['vignette'] | undefined;
+        const vignetteOpts = { amount: 0.5, ...filterOpts } as VignetteOptions;
+        vignette(layer.pixels, doc.width, doc.height, vignetteOpts, selectionMask ?? undefined);
         break;
       }
     }

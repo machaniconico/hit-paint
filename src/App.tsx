@@ -536,9 +536,13 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('zoom-blur', { strength: zoomBlurStrength })}>放射ブラー</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('lens', { amount: 0.3 })}>レンズ歪み</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('sobel-edge')}>エッジ抽出</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('emboss')}>エンボス</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('vignette', { amount: 0.5 })}>ビネット</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('mosaic', { blockSize: mosaicBlockSize })}>モザイク</button>
               <button className="mini" disabled={!canFilterActive}

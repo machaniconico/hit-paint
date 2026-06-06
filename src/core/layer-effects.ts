@@ -20,6 +20,26 @@ export interface OuterGlowOptions {
   opacity: number;
 }
 
+type LayerEffectColorObject = { r: number; g: number; b: number; a?: number };
+type LayerEffectColorTuple = readonly [number, number, number];
+
+export type LayerEffectColor = LayerEffectColorObject | LayerEffectColorTuple;
+
+export interface InnerShadowOptions {
+  dx: number;
+  dy: number;
+  blur: number;
+  color: LayerEffectColor;
+  opacity: number;
+}
+
+export interface BevelEmbossOptions {
+  depth: number;
+  blur: number;
+  angle: number;
+  opacity: number;
+}
+
 /** Add a blurred, offset color copy of source alpha below the source pixels. */
 export function dropShadow(
   px: Uint8ClampedArray,
@@ -59,6 +79,73 @@ export function outerGlow(
   const glowAlpha = outsideMask(boxBlur(sourceAlpha, w, h, blur), sourceAlpha);
   const effect = colorizeAlpha(glowAlpha, color, opacity);
   return compositeSourceOver(effect, px);
+}
+
+/** Add a colorized, offset shadow constrained to the inside of the source alpha shape. */
+export function innerShadow(
+  px: Uint8ClampedArray,
+  w: number,
+  h: number,
+  { dx, dy, blur, color, opacity }: InnerShadowOptions,
+): Uint8ClampedArray {
+  assertBufferSize(px, w, h);
+  if (opacity <= 0) return new Uint8ClampedArray(px);
+
+  const sourceAlpha = alphaMask(px, w, h);
+  const offset = offsetAlpha(sourceAlpha, w, h, Math.round(dx), Math.round(dy));
+  const blurred = boxBlur(offset, w, h, blur);
+  const shadowAlpha = new Float32Array(sourceAlpha.length);
+  for (let i = 0; i < shadowAlpha.length; i++) {
+    shadowAlpha[i] = Math.min(sourceAlpha[i], sourceAlpha[i] * (1 - clamp01(blurred[i])));
+  }
+
+  const effect = colorizeAlpha(shadowAlpha, color, opacity);
+  return compositeEffectOverSource(effect, px, sourceAlpha);
+}
+
+/** Add simple alpha-height bevel lighting constrained to the source alpha shape. */
+export function bevelEmboss(
+  px: Uint8ClampedArray,
+  w: number,
+  h: number,
+  { depth, blur, angle, opacity }: BevelEmbossOptions,
+): Uint8ClampedArray {
+  assertBufferSize(px, w, h);
+  if (opacity <= 0 || depth <= 0) return new Uint8ClampedArray(px);
+
+  const sourceAlpha = alphaMask(px, w, h);
+  const height = boxBlur(sourceAlpha, w, h, blur);
+  const effect = new Uint8ClampedArray(px.length);
+  const radians = (angle * Math.PI) / 180;
+  const lightX = Math.cos(radians);
+  const lightY = Math.sin(radians);
+
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - 1);
+    const y1 = Math.min(h - 1, y + 1);
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const sourceA = sourceAlpha[p];
+      if (sourceA <= 0) continue;
+
+      const x0 = Math.max(0, x - 1);
+      const x1 = Math.min(w - 1, x + 1);
+      const gx = (height[y * w + x1] - height[y * w + x0]) * 0.5;
+      const gy = (height[y1 * w + x] - height[y0 * w + x]) * 0.5;
+      const g = gx * lightX + gy * lightY;
+      const a = clamp01(Math.abs(g) * depth) * clamp01(opacity) * sourceA;
+      if (a <= 0) continue;
+
+      const i = p * 4;
+      const c = g > 0 ? 255 : 0;
+      effect[i] = c;
+      effect[i + 1] = c;
+      effect[i + 2] = c;
+      effect[i + 3] = a * 255;
+    }
+  }
+
+  return compositeEffectOverSource(effect, px, sourceAlpha);
 }
 
 function assertBufferSize(px: Uint8ClampedArray, w: number, h: number): void {
@@ -149,20 +236,48 @@ function outsideMask(effectAlpha: Float32Array, sourceAlpha: Float32Array): Floa
   return out;
 }
 
-function colorizeAlpha(alpha: Float32Array, color: RGBA, opacity: number): Uint8ClampedArray {
+function colorizeAlpha(alpha: Float32Array, color: LayerEffectColor, opacity: number): Uint8ClampedArray {
   const out = new Uint8ClampedArray(alpha.length * 4);
-  const colorAlpha = clamp01((color.a / 255) * opacity);
+  const rgba = normalizeColor(color);
+  const colorAlpha = clamp01((rgba.a / 255) * opacity);
   if (colorAlpha <= 0) return out;
 
   for (let p = 0, i = 0; p < alpha.length; p++, i += 4) {
     const a = clamp01(alpha[p] * colorAlpha);
     if (a <= 0) continue;
-    out[i] = color.r;
-    out[i + 1] = color.g;
-    out[i + 2] = color.b;
+    out[i] = rgba.r;
+    out[i + 1] = rgba.g;
+    out[i + 2] = rgba.b;
     out[i + 3] = a * 255;
   }
 
+  return out;
+}
+
+function normalizeColor(color: LayerEffectColor): RGBA {
+  if (isColorTuple(color)) {
+    return { r: color[0], g: color[1], b: color[2], a: 255 };
+  }
+  return { r: color.r, g: color.g, b: color.b, a: color.a ?? 255 };
+}
+
+function isColorTuple(color: LayerEffectColor): color is LayerEffectColorTuple {
+  return Array.isArray(color);
+}
+
+function compositeEffectOverSource(
+  effect: Uint8ClampedArray,
+  source: Uint8ClampedArray,
+  sourceAlpha: Float32Array,
+): Uint8ClampedArray {
+  const out = compositeSourceOver(source, effect);
+  for (let p = 0, i = 0; p < sourceAlpha.length; p++, i += 4) {
+    if (sourceAlpha[p] > 0) continue;
+    out[i] = source[i];
+    out[i + 1] = source[i + 1];
+    out[i + 2] = source[i + 2];
+    out[i + 3] = source[i + 3];
+  }
   return out;
 }
 

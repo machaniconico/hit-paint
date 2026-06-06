@@ -41,21 +41,26 @@ export function pixelate(
       let b = 0;
       let a = 0;
       let count = 0;
+      let colorCount = 0;
 
       for (let y = blockY; y < endY; y++) {
         for (let x = blockX; x < endX; x++) {
           const index = rgbaIndex(x, y, width);
-          r += source[index];
-          g += source[index + 1];
-          b += source[index + 2];
-          a += source[index + 3];
+          const alpha = source[index + 3];
+          if (alpha > 0) {
+            r += source[index];
+            g += source[index + 1];
+            b += source[index + 2];
+            colorCount++;
+          }
+          a += alpha;
           count++;
         }
       }
 
-      const averageR = r / count;
-      const averageG = g / count;
-      const averageB = b / count;
+      const averageR = colorCount > 0 ? r / colorCount : 0;
+      const averageG = colorCount > 0 ? g / colorCount : 0;
+      const averageB = colorCount > 0 ? b / colorCount : 0;
       const averageA = a / count;
 
       for (let y = blockY; y < endY; y++) {
