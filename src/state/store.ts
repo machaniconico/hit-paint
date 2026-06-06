@@ -105,6 +105,9 @@ import {
   type OuterGlowOptions,
   type StrokeOutlineOptions,
 } from '../core/layer-effects';
+import { serializeProject, deserializeProject } from '../io/project';
+import { extractPalette, type Swatch } from '../color/swatches';
+import { kaleidoscope, type KaleidoscopeOptions } from '../tools/kaleidoscope';
 
 type Maskless<T> = Omit<T, 'mask'>;
 type DuotoneColor = DuotoneOptions['shadow'] | RGBA;
@@ -658,6 +661,8 @@ export interface AppState {
   // document lifecycle
   newDocument: (w?: number, h?: number, name?: string) => void;
   loadDocument: (doc: PaintDocument) => void;
+  saveProjectJson: () => string;
+  loadProjectJson: (json: string) => void;
   exportSvg: () => string;
   captureCurrentFrame: () => void;
   addAnimFrame: () => void;
@@ -679,6 +684,7 @@ export interface AppState {
   moveSwatchAction: (from: number, to: number) => void;
   selectSwatch: (index: number) => void;
   generateHarmony: (scheme: HarmonyScheme) => void;
+  activeLayerSwatches: (count?: number) => Swatch[];
 
   // viewport
   setViewport: (patch: Partial<Viewport>) => void;
@@ -748,6 +754,7 @@ export interface AppState {
   fillWithGradient: (spec?: Partial<GradientSpec>) => void;
   fillWithNoise: (opts?: { scale?: number; seed?: number }) => void;
   fillWithCellular: (opts?: { cellSize?: number; seed?: number }) => void;
+  applyKaleidoscope: (opts?: Partial<KaleidoscopeOptions>) => void;
   applyLayerEffect: <T extends LayerEffectKind>(kind: T, opts?: LayerEffectOptionMap[T]) => void;
 
   // history
@@ -822,6 +829,11 @@ export const useStore = create<AppState>((set, get) => ({
       penPath: null,
     });
   },
+  saveProjectJson: () => serializeProject(get().doc),
+  loadProjectJson: (json) => {
+    const doc = deserializeProject(json);
+    get().loadDocument(doc);
+  },
   exportSvg: () => documentToSvg(get().doc),
   captureCurrentFrame: () => {
     const { doc, timeline } = get();
@@ -895,6 +907,12 @@ export const useStore = create<AppState>((set, get) => ({
   generateHarmony: (scheme) => {
     const colors = harmony(get().primary, scheme);
     set({ swatches: colors.reduce((list, color) => addSwatch(list, color), get().swatches) });
+  },
+  activeLayerSwatches: (count) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster') return [];
+    return extractPalette(layer.pixels, doc.width, doc.height, count ?? 8);
   },
 
   setViewport: (patch) => set({ viewport: { ...get().viewport, ...patch } }),
@@ -2127,6 +2145,16 @@ export const useStore = create<AppState>((set, get) => ({
     if (!pixelsEqual(before, layer.pixels)) {
       get().commitEdit('セルラーノイズ生成', layer.id, before);
     }
+  },
+  applyKaleidoscope: (opts) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const next = kaleidoscope(layer.pixels, doc.width, doc.height, { segments: 6, ...opts });
+    layer.pixels.set(next);
+    get().commitEdit('万華鏡', layer.id, before);
   },
 
   undo: () => {

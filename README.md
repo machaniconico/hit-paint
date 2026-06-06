@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (616 tests)
+npm test           # vitest (636 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -87,6 +87,8 @@ npm run typecheck  # tsc --noEmit
   多段 linear/radial/conic グラデーション生成(`engine/gradient`)、gray-world 自動ホワイトバランス(`filters/white-balance`)。
 - **JSONプロジェクト / 代表色抽出 / 万華鏡** — 全レイヤーをポータブルな JSON で保存・復元(`io/project`、pixels/mask を base64 で round-trip)、
   画像からの代表色スウォッチ抽出(`color/swatches`)、ラジアル対称の万華鏡マッピング(`tools/kaleidoscope`)。
+- **スプライトシート / 除霧 / クローンスタンプ** — アニメフレームの格子合成スプライトシート(`anim/sprite-sheet`)、
+  dark channel prior による除霧(`filters/dehaze`)、領域複製のクローンスタンプ(`tools/clone-stamp`、フォールオフ/不透明度)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、

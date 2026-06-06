@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore, type LayerEffectKind, type LiquifyMode } from './state/store';
 import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
+import { toHex } from './color/swatches';
 import type { AdjustmentSpec, BlendMode, ToolId } from './types';
 import type { AlignMode } from './core/layer-bounds';
 import type { SymmetryConfig } from './engine/symmetry';
@@ -139,6 +140,7 @@ export function App() {
   const [effectBrushKind, setEffectBrushKind] = useState<EffectBrushKind>('blur');
   const toolDrag = useRef<ToolDrag | null>(null);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
+  const layerSwatches = s.activeLayerSwatches();
   const activeTextData = activeLayer?.textData;
   const activeShapeData = activeLayer?.shapeData;
   const activeShapeFill = activeShapeData?.style.fill ?? null;
@@ -226,6 +228,24 @@ export function App() {
     anchor.click();
     URL.revokeObjectURL(url);
   };
+  const saveProjectJson = () => {
+    const json = s.saveProjectJson();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${s.doc.name}.hitpaint.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  const loadProjectJsonFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') s.loadProjectJson(reader.result);
+    };
+    reader.readAsText(file);
+  };
 
   const stagePoint = (e: React.PointerEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -247,6 +267,18 @@ export function App() {
         <button onClick={saveCLIP} title="CLIP形式で保存（HIT Paintで再読込可）">CLIP保存</button>
         <button onClick={exportPng}>PNG書き出し</button>
         <button onClick={exportSvg}>SVG書き出し</button>
+        <button onClick={saveProjectJson}>プロジェクト保存(JSON)</button>
+        <label>
+          プロジェクト読込(JSON)
+          <input
+            type="file"
+            accept=".json,application/json"
+            onChange={(e) => {
+              loadProjectJsonFile(e.currentTarget.files?.[0]);
+              e.currentTarget.value = '';
+            }}
+          />
+        </label>
         <span className="divider" />
         <button onClick={s.undo} disabled={!s.canUndo}>元に戻す</button>
         <button onClick={s.redo} disabled={!s.canRedo}>やり直し</button>
@@ -373,6 +405,27 @@ export function App() {
                   {item.label}
                 </button>
               ))}
+            </div>
+          </section>
+
+          <section className="panel palette-panel">
+            <h3>レイヤーパレット</h3>
+            <div className="swatches saved-swatches">
+              {layerSwatches.map((swatch, index) => {
+                const hex = toHex(swatch.color);
+                return (
+                  <button
+                    key={`${hex}-${index}`}
+                    className="mini"
+                    title={`${hex} ${Math.round(swatch.weight * 100)}%`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    onClick={() => s.setPrimary({ ...swatch.color })}
+                  >
+                    <span className="swatch" style={{ background: hex }} />
+                    <span>{hex}</span>
+                  </button>
+                );
+              })}
             </div>
           </section>
 
@@ -729,6 +782,10 @@ export function App() {
             <button className="mini wide" disabled={!canFilterActive}
               onClick={() => s.fillWithGradient()}>
               グラデーション塗り
+            </button>
+            <button className="mini wide" disabled={!canFilterActive}
+              onClick={() => s.applyKaleidoscope()}>
+              万華鏡
             </button>
             <div className="effect-kind-grid">
               {EFFECT_BRUSH_KINDS.map((item) => (
