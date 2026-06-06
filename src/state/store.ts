@@ -59,6 +59,7 @@ import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type Gradien
 import { emboss, sobelEdge } from '../filters/convolve';
 import { applyCurves, type CurvesOptions } from '../filters/curves';
 import { gaussianBlur, type GaussianBlurOptions } from '../filters/gaussian';
+import { halftone, type HalftoneOptions } from '../filters/halftone';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
 import { lensDistort, type LensDistortOptions } from '../filters/lens';
 import { motionBlur, type MotionBlurOptions, zoomBlur, type ZoomBlurOptions } from '../filters/motion-blur';
@@ -71,6 +72,7 @@ import { unsharpMask } from '../filters/unsharp';
 import { vignette, type VignetteOptions } from '../filters/vignette';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
+import { generateNoiseField, noiseToGrayscale } from '../engine/perlin';
 import {
   addSwatch,
   harmony,
@@ -128,6 +130,7 @@ export interface FilterOptionMap {
   vignette: VignetteOptions;
   'channel-mixer': ChannelMixerOptions;
   clarity: ClarityOptions;
+  halftone: HalftoneOptions;
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -710,6 +713,7 @@ export interface AppState {
 
   // filters
   applyFilter: <T extends FilterName>(name: T, opts?: FilterOptionMap[T]) => void;
+  fillWithNoise: (opts?: { scale?: number; seed?: number }) => void;
   applyLayerEffect: <T extends LayerEffectKind>(kind: T, opts?: LayerEffectOptionMap[T]) => void;
 
   // history
@@ -1904,10 +1908,37 @@ export const useStore = create<AppState>((set, get) => ({
         });
         break;
       }
+      case 'halftone': {
+        const filterOpts = opts as FilterOptionMap['halftone'] | undefined;
+        halftone(layer.pixels, doc.width, doc.height, {
+          cellSize: 6,
+          ...filterOpts,
+          mask: selectionMask,
+        });
+        break;
+      }
     }
 
     if (!pixelsEqual(before, layer.pixels)) {
       get().commitEdit('フィルター', layer.id, before);
+    }
+  },
+  fillWithNoise: (opts) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const next = noiseToGrayscale(generateNoiseField({
+      width: doc.width,
+      height: doc.height,
+      scale: opts?.scale ?? 24,
+      seed: opts?.seed ?? 1,
+    }), doc.width, doc.height);
+    layer.pixels.set(next);
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('ノイズ生成', layer.id, before);
     }
   },
 

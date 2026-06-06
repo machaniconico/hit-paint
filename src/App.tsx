@@ -606,6 +606,8 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('ordered-dither', { levels: 4 })}>ディザ</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('halftone', { cellSize: 6 })}>ハーフトーン</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('quantize', { maxColors: quantizeMaxColors })}>減色</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('color-balance', { midtones: [8, 0, -8] })}>
@@ -841,6 +843,8 @@ export function App() {
                 <button className="mini" onClick={s.addLayer}>＋</button>
                 <button className="mini" onClick={() => s.addShapeLayer()}>シェイプレイヤー追加</button>
                 <button className="mini" onClick={() => s.addVectorLayer()}>ベクターレイヤー追加</button>
+                <button className="mini" disabled={!canFilterActive}
+                  onClick={() => s.fillWithNoise()}>ノイズ生成(Perlin)</button>
                 <button className="mini" disabled={!canMaskActive || !activeLayer}
                   onClick={() => activeLayer && s.addLayerMask(activeLayer.id)}>マスク追加</button>
                 <button className="mini" disabled={!activeLayer?.mask}
