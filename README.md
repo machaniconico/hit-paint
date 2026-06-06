@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (456 tests)
+npm test           # vitest (479 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -70,7 +70,11 @@ npm run typecheck  # tsc --noEmit
 - **ベクターレイヤー** — 複数サブパス(塗り/線/破線)を保持する再編集レイヤー(`vector/vector-layer`、
   `kind:'raster'` + `vectorData`)。編集で再ラスタライズ、Undo はデータごと復元、CLIP 往復で永続化。
 - **スマートシェイプ** — 矩形/角丸矩形/楕円/多角形/星/線のパラメトリック図形(`vector/shape`、
-  `shapeData`)。シェイプツールでドラッグ生成、パラメータ編集で非破壊に再ラスタライズ、CLIP 永続化。
+  `shapeData`)。シェイプツールでドラッグ生成、種別切替/パラメータ編集で非破壊に再ラスタライズ、CLIP 永続化。
+- **ガウシアン / ブルーム** — 真の分離可能ガウシアンぼかし(`filters/gaussian`、α重み付けで透明縁の滲み防止)、
+  高輝度部の発光ブルーム(`filters/bloom`)。チャンネルミキサー(`filters/channel-mixer`)と
+  クラリティ(`filters/clarity`)もフィルターメニューに配線済み。
+- **パス簡略化 / 変換** — Douglas-Peucker 簡略化と AABB/平行移動/拡縮ユーティリティ(`vector/simplify`)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
