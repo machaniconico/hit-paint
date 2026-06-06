@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (503 tests)
+npm test           # vitest (521 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -77,6 +77,8 @@ npm run typecheck  # tsc --noEmit
 - **パス簡略化 / 変換** — Douglas-Peucker 簡略化と AABB/平行移動/拡縮ユーティリティ(`vector/simplify`)。
 - **変位マップ / ハーフトーン / ノイズ** — R/G を変位に使う displacement map(`filters/displace`、bilinear)、
   網点スクリーンのハーフトーン(`filters/halftone`)、決定論的な value noise/fbm 生成(`engine/perlin`)。
+- **色収差 / 油彩 / パース変形** — radial な色収差(`filters/chromatic`)、エッジ保持の油彩 Kuwahara(`filters/oil`)、
+  ホモグラフィによる4点パースペクティブ変形(`tools/perspective`、逆写像 bilinear)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
