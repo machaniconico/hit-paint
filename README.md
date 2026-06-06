@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (309 tests)
+npm test           # vitest (328 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -59,6 +59,8 @@ npm run typecheck  # tsc --noEmit
 - **ベクターパス** — 三次ベジェのパス平坦化と塗り/ストロークのラスタライズ(`vector/path`)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
   nearest/bilinear リサンプル(`tools/resample`)、繰り返しタイル塗りとシームレス化(`tools/pattern`)。
+- **ペンツール / 液状化 / トーン** — ベジェのペンツール(`tools`+`vector/path`、塗り/線で確定・選択尊重・Undo)、
+  液状化ワープ(`tools/liquify` の push/bloat/pinch)、ヒストグラム等化とガンマ補正(`filters/tone`)。
 - **ビューポート** — パン(Shift/中ボタン/手のひら) / ホイールズーム / 回転対応の変換行列。
 - **Undo/Redo** — 画素スナップショット方式のコマンド履歴(テキストレイヤーは textData も復元)。
 - **入出力** — 下記。
@@ -100,12 +102,12 @@ src/
               symmetry(対称描画) / brush-dynamics(ジッター/散布)
   tools/      fill / selection / transform / mask-paint(マスク手描き) /
               layer-transform(反転・回転) / gradient / magic-wand / marquee(選択形状) /
-              resample(拡縮) / pattern(タイル・シームレス)
+              resample(拡縮) / pattern(タイル・シームレス) / liquify(液状化)
   text/       font5x7(ビットマップフォント) / text-layer(再編集テキストデータ)
   vector/     path(ベジェ・パスのラスタライズ)
   anim/       timeline(フレーム・オニオンスキン)
   filters/    index(基本フィルター) / curves / color-balance / histogram /
-              convolve(エッジ/エンボス) / pixelate / noise / quantize(減色)
+              convolve(エッジ/エンボス) / pixelate / noise / quantize(減色) / tone(等化・ガンマ)
   color/      color(RGB<->HSV / hex) / palette(スウォッチ・配色ハーモニー)
   io/         psd / clip / png / files(DLとピッカー)
   state/      store(zustand 統合点)
