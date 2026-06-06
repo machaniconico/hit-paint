@@ -50,6 +50,69 @@ describe('paintMaskDab', () => {
     expect(mask[index(width, 5, 3)]).toBeLessThan(255);
   });
 
+  it('uses smoothstep edge coverage for soft-shaped dabs', () => {
+    const width = 9;
+    const roundMask = new Uint8ClampedArray(width * 9);
+    const softMask = new Uint8ClampedArray(width * 9);
+
+    paintMaskDab(roundMask, width, 9, {
+      x: 4,
+      y: 4,
+      radius: 4,
+      value: 255,
+      hardness: 0,
+      shape: 'round',
+    });
+    paintMaskDab(softMask, width, 9, {
+      x: 4,
+      y: 4,
+      radius: 4,
+      value: 255,
+      hardness: 0,
+      shape: 'soft',
+    });
+
+    expect(roundMask[index(width, 7, 4)]).toBe(64);
+    expect(softMask[index(width, 7, 4)]).toBe(40);
+    expect(softMask[index(width, 7, 4)]).toBeGreaterThan(0);
+    expect(softMask[index(width, 7, 4)]).toBeLessThan(roundMask[index(width, 7, 4)]);
+  });
+
+  it('scales a single dab blend by flow', () => {
+    const width = 5;
+    const fullFlowMask = new Uint8ClampedArray(width * 5);
+    const halfFlowMask = new Uint8ClampedArray(width * 5);
+
+    paintMaskDab(fullFlowMask, width, 5, { x: 2, y: 2, radius: 2, value: 200, flow: 1 });
+    paintMaskDab(halfFlowMask, width, 5, { x: 2, y: 2, radius: 2, value: 200, flow: 0.5 });
+
+    expect(fullFlowMask[index(width, 2, 2)]).toBe(200);
+    expect(halfFlowMask[index(width, 2, 2)]).toBe(100);
+    expect(halfFlowMask[index(width, 2, 2)]).toBe(fullFlowMask[index(width, 2, 2)] / 2);
+  });
+
+  it('keeps legacy defaults identical to explicit round shape and full flow', () => {
+    const width = 7;
+    const defaultMask = new Uint8ClampedArray(width * 7);
+    const explicitMask = new Uint8ClampedArray(width * 7);
+    defaultMask.fill(100);
+    explicitMask.fill(100);
+
+    paintMaskDab(defaultMask, width, 7, { x: 3, y: 3, radius: 3, value: 220, hardness: 0.5 });
+    paintMaskDab(explicitMask, width, 7, {
+      x: 3,
+      y: 3,
+      radius: 3,
+      value: 220,
+      hardness: 0.5,
+      shape: 'round',
+      flow: 1,
+    });
+
+    expect(Array.from(defaultMask)).toEqual(Array.from(explicitMask));
+    expect(defaultMask[index(width, 5, 3)]).toBe(180);
+  });
+
   it('blends additively toward the target value from the existing mask value', () => {
     const width = 5;
     const mask = new Uint8ClampedArray(width * 5);

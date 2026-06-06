@@ -5,6 +5,8 @@
  * dependency-free so it can be the single source of truth for the data model.
  */
 
+import type { TextLayerData } from '../text/text-layer';
+
 // ---------------------------------------------------------------------------
 // Color
 // ---------------------------------------------------------------------------
@@ -87,6 +89,8 @@ export interface Layer {
   clipping: boolean;
   /** RGBA pixels, length = width*height*4. Undefined for groups and adjustment layers. */
   pixels?: Uint8ClampedArray;
+  /** これを持つ raster レイヤーは textData から pixels を再生成できる再編集テキストレイヤー。 */
+  textData?: TextLayerData;
   /** Non-destructive filter applied by kind==='adjustment'. */
   adjustment?: AdjustmentSpec;
   /** 8-bit visibility mask, length = width*height (0 = hide, 255 = show). */

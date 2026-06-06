@@ -1,4 +1,6 @@
 import type { AdjustmentSpec, Layer, LayerId, PaintDocument, RGBA } from '../types';
+import type { TextLayerData } from '../text/text-layer';
+import { rasterizeTextLayer } from '../text/text-layer';
 
 let _counter = 0;
 /** Deterministic-ish unique id (avoids Math.random for testability). */
@@ -32,6 +34,26 @@ export function createRasterLayer(
     locked: false,
     clipping: false,
     pixels,
+  };
+}
+
+export function createTextLayer(
+  width: number,
+  height: number,
+  data: TextLayerData,
+  name = 'テキスト',
+): Layer {
+  return {
+    id: uid('text'),
+    name,
+    kind: 'raster',
+    visible: true,
+    opacity: 1,
+    blendMode: 'normal',
+    locked: false,
+    clipping: false,
+    pixels: rasterizeTextLayer(data, width, height),
+    textData: data,
   };
 }
 

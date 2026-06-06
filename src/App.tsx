@@ -55,6 +55,7 @@ export function App() {
   const s = useStore();
   const [blurRadius, setBlurRadius] = useState(4);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
+  const activeTextData = activeLayer?.textData;
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
   const canMaskActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster');
 
@@ -136,7 +137,7 @@ export function App() {
             const rect = e.currentTarget.getBoundingClientRect();
             const point = screenToDoc(e.clientX - rect.left, e.clientY - rect.top, s.viewport);
             const text = window.prompt('テキストを入力');
-            if (text) s.placeTextAt(point.x, point.y, text);
+            if (text) s.createTextLayerAt(point.x, point.y, text);
           }}
         >
           <Canvas />
@@ -194,6 +195,39 @@ export function App() {
               {s.doc.selection ? '選択範囲を描画色で塗る' : 'レイヤーを描画色で塗る'}
             </button>
           </section>
+
+          {activeTextData && (
+            <section className="panel text-edit">
+              <h3>テキスト編集</h3>
+              <label>文字
+                <textarea
+                  value={activeTextData.text}
+                  onChange={(e) => s.updateActiveTextLayer({ text: e.target.value })}
+                />
+              </label>
+              <label>サイズ
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={activeTextData.scale ?? 1}
+                  onChange={(e) => {
+                    const scale = Number(e.target.value);
+                    if (Number.isFinite(scale)) {
+                      s.updateActiveTextLayer({ scale: Math.max(1, Math.trunc(scale)) });
+                    }
+                  }}
+                />
+              </label>
+              <label>色
+                <input
+                  type="color"
+                  value={rgbaToHex(activeTextData.color)}
+                  onChange={(e) => s.updateActiveTextLayer({ color: hexToRgba(e.target.value) })}
+                />
+              </label>
+            </section>
+          )}
 
           <section className="panel filters">
             <h3>フィルター</h3>

@@ -4,6 +4,8 @@ export interface MaskDabOptions {
   radius: number;
   value: number;
   hardness?: number;
+  shape?: 'round' | 'soft';
+  flow?: number;
 }
 
 type MaskStrokePoint = {
@@ -36,6 +38,24 @@ function coverageAtDistance(distance: number, radius: number, hardness: number):
   return Math.max(0, Math.min(1, (radius - distance) / fadeWidth));
 }
 
+function smoothstep(value: number): number {
+  return value * value * (3 - 2 * value);
+}
+
+function softCoverageAtDistance(distance: number, radius: number, hardness: number): number {
+  if (distance > radius) return 0;
+  if (hardness >= 1) return 1;
+
+  const innerRadius = radius * hardness;
+  if (distance <= innerRadius) return 1;
+
+  const fadeWidth = radius - innerRadius;
+  if (fadeWidth <= 0) return 1;
+
+  const t = Math.max(0, Math.min(1, (radius - distance) / fadeWidth));
+  return smoothstep(t);
+}
+
 export function paintMaskDab(
   mask: Uint8ClampedArray,
   width: number,
@@ -47,6 +67,8 @@ export function paintMaskDab(
 
   const value = clampByte(opts.value);
   const hardness = clampUnit(opts.hardness ?? 1);
+  const flow = clampUnit(opts.flow ?? 1);
+  const shape = opts.shape ?? 'round';
 
   const minX = Math.max(0, Math.ceil(opts.x - radius));
   const maxX = Math.min(width - 1, Math.floor(opts.x + radius));
@@ -56,13 +78,19 @@ export function paintMaskDab(
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
       const distance = Math.hypot(x - opts.x, y - opts.y);
-      const coverage = coverageAtDistance(distance, radius, hardness);
+      const coverage =
+        shape === 'soft'
+          ? softCoverageAtDistance(distance, radius, hardness)
+          : coverageAtDistance(distance, radius, hardness);
       if (coverage <= 0) continue;
+
+      const effectiveCoverage = coverage * flow;
+      if (effectiveCoverage <= 0) continue;
 
       const index = y * width + x;
       if (index >= mask.length) continue;
 
-      mask[index] = Math.round(mask[index] * (1 - coverage) + value * coverage);
+      mask[index] = Math.round(mask[index] * (1 - effectiveCoverage) + value * effectiveCoverage);
     }
   }
 }

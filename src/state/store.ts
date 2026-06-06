@@ -2,9 +2,10 @@ import { create } from 'zustand';
 import type {
   AdjustmentSpec, BrushSettings, Layer, LayerId, PaintDocument, PointerSample, RGBA, ToolId, Viewport,
 } from '../types';
+import type { TextLayerData } from '../text/text-layer';
 import { DEFAULT_BRUSH, IDENTITY_VIEWPORT } from '../types';
 import {
-  createAdjustmentLayer, createDocument, createRasterLayer, createLayerMask, createGroupLayer,
+  createAdjustmentLayer, createDocument, createRasterLayer, createLayerMask, createGroupLayer, createTextLayer,
   findLayer, activeLayer, layerIndex,
 } from '../core/document';
 import { addToGroup, removeFromGroup } from '../core/group-ops';
@@ -17,6 +18,7 @@ import { featherSelection, growSelection, invertSelection, selectAll, shrinkSele
 import { moveLayerPixels } from '../tools/transform';
 import type { Selection } from '../types';
 import { renderText } from '../text';
+import { createTextLayerData, rasterizeTextLayer, updateTextLayerData } from '../text/text-layer';
 import {
   adjustBrightnessContrast,
   adjustHueSaturation,
@@ -98,6 +100,24 @@ function adjustmentLayerName(type: AdjustmentSpec['type']): string {
   }
 }
 
+function cloneTextLayerData(data: TextLayerData): TextLayerData {
+  return { ...data, color: { ...data.color } };
+}
+
+function textLayerDataEquals(a: TextLayerData, b: TextLayerData): boolean {
+  return (
+    a.text === b.text
+    && a.x === b.x
+    && a.y === b.y
+    && a.scale === b.scale
+    && a.letterSpacing === b.letterSpacing
+    && a.color.r === b.color.r
+    && a.color.g === b.color.g
+    && a.color.b === b.color.b
+    && a.color.a === b.color.a
+  );
+}
+
 export interface AppState {
   doc: PaintDocument;
   viewport: Viewport;
@@ -139,6 +159,8 @@ export interface AppState {
   floodFillAt: (x: number, y: number) => void;
   moveActiveLayer: (dx: number, dy: number) => void;
   placeTextAt: (x: number, y: number, text: string) => void;
+  createTextLayerAt: (x: number, y: number, text: string) => void;
+  updateActiveTextLayer: (patch: Partial<TextLayerData>) => void;
 
   // selection
   setSelection: (sel: Selection | null) => void;
@@ -172,7 +194,7 @@ export interface AppState {
   undo: () => void;
   redo: () => void;
   /** record an externally-applied edit (tools/io) for undo */
-  commitEdit: (label: string, layerId: LayerId, before: Uint8ClampedArray) => void;
+  commitEdit: (label: string, layerId: LayerId, before: Uint8ClampedArray, beforeTextData?: TextLayerData) => void;
   bump: () => void;
 }
 
@@ -358,6 +380,58 @@ export const useStore = create<AppState>((set, get) => ({
     if (!pixelsEqual(before, layer.pixels)) {
       get().commitEdit('テキスト', layer.id, before);
     }
+  },
+  createTextLayerAt: (x, y, text) => {
+    const { doc, primary } = get();
+    if (text.length === 0) return;
+
+    const data = createTextLayerData({ text, x, y, color: { ...primary }, scale: 2 });
+    const layer = createTextLayer(doc.width, doc.height, data, 'テキスト');
+    const activeIndex = doc.activeLayerId ? layerIndex(doc, doc.activeLayerId) : -1;
+    const insertAt = activeIndex >= 0 ? activeIndex + 1 : doc.layers.length;
+    const layers = [...doc.layers];
+    layers.splice(insertAt, 0, layer);
+    const previousActiveLayerId = doc.activeLayerId;
+
+    set({ doc: { ...doc, layers, activeLayerId: layer.id }, rev: get().rev + 1 });
+    history.push({
+      label: 'テキストレイヤー作成',
+      undo: () => {
+        const currentDoc = get().doc;
+        set({
+          doc: {
+            ...currentDoc,
+            layers: currentDoc.layers.filter((item) => item.id !== layer.id),
+            activeLayerId: previousActiveLayerId,
+          },
+        });
+      },
+      redo: () => {
+        const currentDoc = get().doc;
+        const nextLayers = [...currentDoc.layers];
+        const nextIndex = Math.min(insertAt, nextLayers.length);
+        nextLayers.splice(nextIndex, 0, layer);
+        set({ doc: { ...currentDoc, layers: nextLayers, activeLayerId: layer.id } });
+      },
+    });
+    set({ canUndo: history.canUndo(), canRedo: history.canRedo() });
+  },
+  updateActiveTextLayer: (patch) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || !layer.textData) return;
+
+    const beforePixels = layer.pixels.slice();
+    const beforeTextData = cloneTextLayerData(layer.textData);
+    const textData = updateTextLayerData(layer.textData, patch);
+    const pixels = rasterizeTextLayer(textData, doc.width, doc.height);
+    if (textLayerDataEquals(beforeTextData, textData) && pixelsEqual(beforePixels, pixels)) return;
+
+    const layers = doc.layers.map((item) => (
+      item.id === layer.id ? { ...item, textData, pixels } : item
+    ));
+    set({ doc: { ...doc, layers } });
+    get().commitEdit('テキスト編集', layer.id, beforePixels, beforeTextData);
   },
 
   setSelection: (sel) => set({ doc: { ...get().doc, selection: sel }, rev: get().rev + 1 }),
@@ -569,10 +643,32 @@ export const useStore = create<AppState>((set, get) => ({
     history.redo();
     set({ rev: get().rev + 1, canUndo: history.canUndo(), canRedo: history.canRedo() });
   },
-  commitEdit: (label, layerId, before) => {
-    const after = findLayer(get().doc, layerId)?.pixels?.slice();
+  commitEdit: (label, layerId, before, beforeTextData) => {
+    const afterLayer = findLayer(get().doc, layerId);
+    const after = afterLayer?.pixels?.slice();
     if (!after) return;
-    history.push(pixelSnapshotCommand(label, () => findLayer(get().doc, layerId)?.pixels, before, after));
+    const afterTextData = beforeTextData && afterLayer?.textData ? cloneTextLayerData(afterLayer.textData) : undefined;
+    if (beforeTextData && afterTextData) {
+      history.push({
+        label,
+        undo: () => {
+          const currentDoc = get().doc;
+          const layers = currentDoc.layers.map((item) => (
+            item.id === layerId ? { ...item, pixels: before.slice(), textData: cloneTextLayerData(beforeTextData) } : item
+          ));
+          set({ doc: { ...currentDoc, layers } });
+        },
+        redo: () => {
+          const currentDoc = get().doc;
+          const layers = currentDoc.layers.map((item) => (
+            item.id === layerId ? { ...item, pixels: after.slice(), textData: cloneTextLayerData(afterTextData) } : item
+          ));
+          set({ doc: { ...currentDoc, layers } });
+        },
+      });
+    } else {
+      history.push(pixelSnapshotCommand(label, () => findLayer(get().doc, layerId)?.pixels, before, after));
+    }
     set({ rev: get().rev + 1, canUndo: history.canUndo(), canRedo: history.canRedo() });
   },
   bump: () => set({ rev: get().rev + 1 }),
