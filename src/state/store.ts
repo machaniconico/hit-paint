@@ -70,10 +70,14 @@ import {
 } from '../color/palette';
 import { rasterizeFill, rasterizeStroke, type VectorPath } from '../vector/path';
 import {
+  bevelEmboss,
   dropShadow,
+  innerShadow,
   outerGlow,
   strokeOutline,
+  type BevelEmbossOptions,
   type DropShadowOptions,
+  type InnerShadowOptions,
   type OuterGlowOptions,
   type StrokeOutlineOptions,
 } from '../core/layer-effects';
@@ -119,6 +123,8 @@ export interface LayerEffectOptionMap {
   'drop-shadow': Partial<DropShadowOptions>;
   stroke: Partial<StrokeOutlineOptions>;
   glow: Partial<OuterGlowOptions>;
+  'inner-shadow': Partial<InnerShadowOptions>;
+  'bevel-emboss': Partial<BevelEmbossOptions>;
 }
 
 export type LayerEffectKind = keyof LayerEffectOptionMap;
@@ -1459,6 +1465,27 @@ export const useStore = create<AppState>((set, get) => ({
           blur: effectOpts?.blur ?? 6,
           color: effectOpts?.color ?? primary,
           opacity: effectOpts?.opacity ?? 0.6,
+        });
+        break;
+      }
+      case 'inner-shadow': {
+        const effectOpts = opts as LayerEffectOptionMap['inner-shadow'] | undefined;
+        next = innerShadow(layer.pixels, doc.width, doc.height, {
+          dx: effectOpts?.dx ?? 4,
+          dy: effectOpts?.dy ?? 4,
+          blur: effectOpts?.blur ?? 4,
+          color: effectOpts?.color ?? BLACK,
+          opacity: effectOpts?.opacity ?? 0.5,
+        });
+        break;
+      }
+      case 'bevel-emboss': {
+        const effectOpts = opts as LayerEffectOptionMap['bevel-emboss'] | undefined;
+        next = bevelEmboss(layer.pixels, doc.width, doc.height, {
+          depth: effectOpts?.depth ?? 1,
+          blur: effectOpts?.blur ?? 3,
+          angle: effectOpts?.angle ?? 135,
+          opacity: effectOpts?.opacity ?? 0.7,
         });
         break;
       }

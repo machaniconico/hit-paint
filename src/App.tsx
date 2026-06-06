@@ -78,6 +78,8 @@ const LAYER_EFFECT_BUTTONS: { kind: LayerEffectKind; label: string }[] = [
   { kind: 'drop-shadow', label: 'ドロップシャドウ' },
   { kind: 'stroke', label: '縁取り' },
   { kind: 'glow', label: '光彩' },
+  { kind: 'inner-shadow', label: 'インナーシャドウ' },
+  { kind: 'bevel-emboss', label: 'ベベル・エンボス' },
 ];
 
 const SYMMETRY_MODES: { mode: SymmetryConfig['mode']; label: string }[] = [
