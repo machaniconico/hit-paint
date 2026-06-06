@@ -216,6 +216,16 @@ export function App() {
     const blob = await exportPNG(useStore.getState().doc);
     downloadBlob(blob, `${s.doc.name}.png`);
   };
+  const exportSvg = () => {
+    const svg = s.exportSvg();
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${s.doc.name}.svg`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const stagePoint = (e: React.PointerEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -236,6 +246,7 @@ export function App() {
         <button onClick={savePSD} title="Photoshop形式で保存">PSD保存</button>
         <button onClick={saveCLIP} title="CLIP形式で保存（HIT Paintで再読込可）">CLIP保存</button>
         <button onClick={exportPng}>PNG書き出し</button>
+        <button onClick={exportSvg}>SVG書き出し</button>
         <span className="divider" />
         <button onClick={s.undo} disabled={!s.canUndo}>元に戻す</button>
         <button onClick={s.redo} disabled={!s.canRedo}>やり直し</button>
@@ -593,6 +604,8 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('auto-contrast')}>オートコントラスト</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('white-balance', { strength: 1 })}>自動WB</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('equalize')}>ヒストグラム等化</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('gamma', { gamma: gammaValue })}>ガンマ補正</button>
@@ -712,6 +725,10 @@ export function App() {
             <button className="mini wide" disabled={!canFilterActive}
               onClick={() => s.applyGradient(0, 0, Math.max(1, s.doc.width - 1), 0)}>
               横グラデーション
+            </button>
+            <button className="mini wide" disabled={!canFilterActive}
+              onClick={() => s.fillWithGradient()}>
+              グラデーション塗り
             </button>
             <div className="effect-kind-grid">
               {EFFECT_BRUSH_KINDS.map((item) => (

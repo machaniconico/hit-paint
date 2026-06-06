@@ -26,6 +26,7 @@ import { flipHorizontal, flipVertical, rotate180, rotate90CCW, rotate90CW } from
 import { cropDocument, resizeCanvas, type ResizeCanvasOptions } from '../core/doc-ops';
 import { alignOffset, opaqueBounds, translatePixels, type AlignMode } from '../core/layer-bounds';
 import type { BlendMode, Selection } from '../types';
+import { documentToSvg } from '../io/svg';
 import { renderText } from '../text';
 import { createTextLayerData, rasterizeTextLayer, updateTextLayerData } from '../text/text-layer';
 import { createShapeData, rasterizeShape, updateShapeData, type ShapeData } from '../vector/shape';
@@ -76,6 +77,8 @@ import { pencilSketch, type SketchOptions } from '../filters/sketch';
 import { adjustGamma, equalizeHistogram } from '../filters/tone';
 import { unsharpMask } from '../filters/unsharp';
 import { vignette, type VignetteOptions } from '../filters/vignette';
+import { autoWhiteBalance, type WhiteBalanceOptions } from '../filters/white-balance';
+import { generateGradient, type GradientSpec } from '../engine/gradient';
 import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import { worleyField, worleyToGrayscale } from '../engine/cellular';
@@ -129,6 +132,7 @@ export interface FilterOptionMap {
   sepia: Record<string, never>;
   'auto-levels': Partial<Maskless<AutoToneOptions>>;
   'auto-contrast': Partial<Maskless<AutoToneOptions>>;
+  'white-balance': WhiteBalanceOptions;
   'sobel-edge': Record<string, never>;
   emboss: Record<string, never>;
   mosaic: Partial<Maskless<PixelateOptions>>;
@@ -654,6 +658,7 @@ export interface AppState {
   // document lifecycle
   newDocument: (w?: number, h?: number, name?: string) => void;
   loadDocument: (doc: PaintDocument) => void;
+  exportSvg: () => string;
   captureCurrentFrame: () => void;
   addAnimFrame: () => void;
   gotoAnimFrame: (index: number) => void;
@@ -740,6 +745,7 @@ export interface AppState {
 
   // filters
   applyFilter: <T extends FilterName>(name: T, opts?: FilterOptionMap[T]) => void;
+  fillWithGradient: (spec?: Partial<GradientSpec>) => void;
   fillWithNoise: (opts?: { scale?: number; seed?: number }) => void;
   fillWithCellular: (opts?: { cellSize?: number; seed?: number }) => void;
   applyLayerEffect: <T extends LayerEffectKind>(kind: T, opts?: LayerEffectOptionMap[T]) => void;
@@ -816,6 +822,7 @@ export const useStore = create<AppState>((set, get) => ({
       penPath: null,
     });
   },
+  exportSvg: () => documentToSvg(get().doc),
   captureCurrentFrame: () => {
     const { doc, timeline } = get();
     set({ timeline: snapshotCurrentTimelineFrame(timeline, doc) });
@@ -1862,6 +1869,14 @@ export const useStore = create<AppState>((set, get) => ({
         });
         break;
       }
+      case 'white-balance': {
+        const filterOpts = opts as FilterOptionMap['white-balance'] | undefined;
+        autoWhiteBalance(layer.pixels, doc.width, doc.height, {
+          ...filterOpts,
+          mask: filterOpts?.mask ?? selectionMask,
+        });
+        break;
+      }
       case 'sobel-edge':
         sobelEdge(layer.pixels, doc.width, doc.height, { mask: selectionMask });
         break;
@@ -2046,6 +2061,35 @@ export const useStore = create<AppState>((set, get) => ({
 
     if (!pixelsEqual(before, layer.pixels)) {
       get().commitEdit('フィルター', layer.id, before);
+    }
+  },
+  fillWithGradient: (spec) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    const defaultSpec: GradientSpec = {
+      kind: 'linear',
+      x0: 0,
+      y0: 0,
+      x1: doc.width,
+      y1: 0,
+      stops: [
+        { offset: 0, color: { r: 0, g: 0, b: 0, a: 255 } },
+        { offset: 1, color: { r: 255, g: 255, b: 255, a: 255 } },
+      ],
+    };
+    const mergedSpec: GradientSpec = {
+      ...defaultSpec,
+      ...spec,
+      stops: spec?.stops ?? defaultSpec.stops,
+    };
+
+    layer.pixels.set(generateGradient(doc.width, doc.height, mergedSpec));
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('グラデーション', layer.id, before);
     }
   },
   fillWithNoise: (opts) => {
