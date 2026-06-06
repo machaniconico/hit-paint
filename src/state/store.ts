@@ -10,7 +10,6 @@ import {
 } from '../core/document';
 import { addToGroup, removeFromGroup } from '../core/group-ops';
 import { History, pixelSnapshotCommand } from '../core/history';
-import { StrokeEngine } from '../engine/brush';
 import { BLACK, WHITE } from '../color/color';
 import { floodFill, fillRegion } from '../tools/fill';
 import { fillLinearGradient } from '../tools/gradient';
@@ -23,7 +22,7 @@ import { blurDab, burnDab, dodgeDab, sharpenDab } from '../engine/effect-brush';
 import { flipHorizontal, flipVertical, rotate180, rotate90CCW, rotate90CW } from '../tools/layer-transform';
 import { cropDocument, resizeCanvas, type ResizeCanvasOptions } from '../core/doc-ops';
 import { alignOffset, opaqueBounds, translatePixels, type AlignMode } from '../core/layer-bounds';
-import type { Selection } from '../types';
+import type { BlendMode, Selection } from '../types';
 import { renderText } from '../text';
 import { createTextLayerData, rasterizeTextLayer, updateTextLayerData } from '../text/text-layer';
 import {
@@ -51,6 +50,15 @@ import { applyCurves, type CurvesOptions } from '../filters/curves';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
 import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
+import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
+import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
+import {
+  addSwatch,
+  harmony,
+  moveSwatch,
+  removeSwatch,
+  type HarmonyScheme,
+} from '../color/palette';
 import {
   dropShadow,
   outerGlow,
@@ -98,7 +106,7 @@ export type LayerEffectOptions = LayerEffectOptionMap[LayerEffectKind];
 
 /** Transient, non-reactive stroke state (kept out of the reactive store). */
 interface StrokeContext {
-  engine: StrokeEngine;
+  engine: StoreStrokeEngine;
   layerId: LayerId;
   before: Uint8ClampedArray; // snapshot for undo
   color: RGBA;
@@ -108,6 +116,220 @@ let activeMaskStroke: LayerId | null = null;
 export const getActiveStroke = () => activeStroke;
 
 const history = new History(60);
+
+const BLENDS: Record<BlendMode, (b: number, s: number) => number> = {
+  normal: (_b, s) => s,
+  multiply: (b, s) => b * s,
+  screen: (b, s) => b + s - b * s,
+  overlay: (b, s) => (b <= 0.5 ? 2 * b * s : 1 - 2 * (1 - b) * (1 - s)),
+  darken: (b, s) => Math.min(b, s),
+  lighten: (b, s) => Math.max(b, s),
+  'color-dodge': (b, s) => (s >= 1 ? 1 : Math.min(1, b / (1 - s))),
+  'color-burn': (b, s) => (s <= 0 ? 0 : 1 - Math.min(1, (1 - b) / s)),
+  'hard-light': (b, s) => (s <= 0.5 ? 2 * b * s : 1 - 2 * (1 - b) * (1 - s)),
+  'soft-light': (b, s) =>
+    s <= 0.5
+      ? b - (1 - 2 * s) * b * (1 - b)
+      : b + (2 * s - 1) * ((b <= 0.25 ? ((16 * b - 12) * b + 4) * b : Math.sqrt(b)) - b),
+  difference: (b, s) => Math.abs(b - s),
+  exclusion: (b, s) => b + s - 2 * b * s,
+  add: (b, s) => Math.min(1, b + s),
+  subtract: (b, s) => Math.max(0, b - s),
+};
+
+function defaultSymmetry(width: number, height: number): SymmetryConfig {
+  return {
+    mode: 'none',
+    centerX: width / 2,
+    centerY: height / 2,
+    slices: 6,
+  };
+}
+
+function defaultDynamics(): DynamicsConfig {
+  return {
+    sizeJitter: 0,
+    opacityJitter: 0,
+    scatter: 0,
+    seed: 0,
+  };
+}
+
+function dabFalloff(d: number, hardness: number, pixel: boolean): number {
+  if (d >= 1) return 0;
+  if (pixel) return 1;
+  const inner = hardness;
+  if (d <= inner) return 1;
+  const t = (d - inner) / (1 - inner);
+  return 1 - (t * t * (3 - 2 * t));
+}
+
+class StoreStrokeEngine {
+  readonly width: number;
+  readonly height: number;
+  readonly coverage: Float32Array;
+
+  private brush: BrushSettings;
+  private erase: boolean;
+  private symmetry: SymmetryConfig;
+  private dynamics: DynamicsConfig;
+  private last: PointerSample | null = null;
+  private residual = 0;
+  private dabStep = 0;
+
+  constructor(
+    width: number,
+    height: number,
+    brush: BrushSettings,
+    erase: boolean,
+    symmetry: SymmetryConfig,
+    dynamics: DynamicsConfig,
+  ) {
+    this.width = width;
+    this.height = height;
+    this.brush = brush;
+    this.erase = erase;
+    this.symmetry = symmetry;
+    this.dynamics = dynamics;
+    this.coverage = new Float32Array(width * height);
+  }
+
+  private stampCoverage(x: number, y: number, size: number, flow: number): void {
+    const radius = size / 2;
+    if (radius <= 0 || flow <= 0) return;
+    const pixel = this.brush.shape === 'pixel';
+    const x0 = Math.max(0, Math.floor(x - radius));
+    const x1 = Math.min(this.width - 1, Math.ceil(x + radius));
+    const y0 = Math.max(0, Math.floor(y - radius));
+    const y1 = Math.min(this.height - 1, Math.ceil(y + radius));
+    const hardness = this.brush.shape === 'round' ? 0.95 : this.brush.hardness;
+
+    for (let py = y0; py <= y1; py += 1) {
+      for (let px = x0; px <= x1; px += 1) {
+        const dx = (px + 0.5 - x) / radius;
+        const dy = (py + 0.5 - y) / radius;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const a = dabFalloff(d, hardness, pixel) * flow;
+        if (a <= 0) continue;
+        const idx = py * this.width + px;
+        if (a > this.coverage[idx]) this.coverage[idx] = a;
+      }
+    }
+  }
+
+  private stamp(x: number, y: number, pressure: number): void {
+    const sizePressure = this.brush.pressureSize ? Math.max(0.05, pressure) : 1;
+    const opacityPressure = this.brush.pressureOpacity ? Math.max(0.05, pressure) : 1;
+    const dab = applyDynamics(
+      {
+        size: sizePressure * this.brush.size,
+        opacity: this.brush.opacity,
+        x,
+        y,
+      },
+      this.dynamics,
+      this.dabStep,
+    );
+    this.dabStep += 1;
+
+    const opacityScale = this.brush.opacity > 0 ? dab.opacity / this.brush.opacity : 1;
+    const flow = this.brush.flow * opacityPressure * opacityScale;
+    const points = this.symmetry.mode === 'none'
+      ? [{ x: dab.x, y: dab.y }]
+      : mirrorPoints(dab.x, dab.y, this.symmetry);
+    for (const point of points) {
+      this.stampCoverage(point.x, point.y, dab.size, flow);
+    }
+  }
+
+  addSample(s: PointerSample): void {
+    if (!this.last) {
+      this.stamp(s.x, s.y, s.pressure);
+      this.last = s;
+      return;
+    }
+
+    const prev = this.last;
+    const dx = s.x - prev.x;
+    const dy = s.y - prev.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const avgPressure = (prev.pressure + s.pressure) / 2;
+    const size = (this.brush.pressureSize ? Math.max(0.05, avgPressure) : 1) * this.brush.size;
+    const step = Math.max(0.5, this.brush.spacing * size);
+    let traveled = -this.residual;
+    while (traveled + step <= dist) {
+      traveled += step;
+      const t = traveled / dist;
+      const px = prev.x + dx * t;
+      const py = prev.y + dy * t;
+      const pr = prev.pressure + (s.pressure - prev.pressure) * t;
+      this.stamp(px, py, pr);
+    }
+    this.residual = dist - traveled;
+    this.last = s;
+  }
+
+  isErase(): boolean {
+    return this.erase;
+  }
+
+  commit(target: Uint8ClampedArray, color: RGBA, selection?: Uint8ClampedArray | null): void {
+    const opacity = this.brush.opacity;
+    for (let i = 0; i < this.coverage.length; i += 1) {
+      let cov = this.coverage[i] * opacity;
+      if (cov <= 0) continue;
+      if (selection) cov *= selection[i] / 255;
+      if (cov <= 0) continue;
+      const o = i * 4;
+      if (this.erase) {
+        target[o + 3] = target[o + 3] * (1 - cov);
+        continue;
+      }
+      const sa = cov;
+      const da = target[o + 3] / 255;
+      const oa = sa + da * (1 - sa);
+      if (oa <= 0) continue;
+      target[o] = (color.r * sa + target[o] * da * (1 - sa)) / oa;
+      target[o + 1] = (color.g * sa + target[o + 1] * da * (1 - sa)) / oa;
+      target[o + 2] = (color.b * sa + target[o + 2] * da * (1 - sa)) / oa;
+      target[o + 3] = oa * 255;
+    }
+  }
+}
+
+function compositeLayerPixelsIntoBottom(bottom: Uint8ClampedArray, top: Layer): void {
+  if (!top.pixels) return;
+  const src = top.pixels;
+  const blend = BLENDS[top.blendMode] ?? BLENDS.normal;
+
+  for (let i = 0, p = 0; i < src.length; i += 4, p += 1) {
+    let sa = (src[i + 3] / 255) * top.opacity;
+    if (sa <= 0) continue;
+    if (top.mask) sa *= top.mask[p] / 255;
+    if (sa <= 0) continue;
+
+    const da = bottom[i + 3] / 255;
+    const sr = src[i] / 255;
+    const sg = src[i + 1] / 255;
+    const sb = src[i + 2] / 255;
+    const dr = bottom[i] / 255;
+    const dg = bottom[i + 1] / 255;
+    const db = bottom[i + 2] / 255;
+    const br = da > 0 ? blend(dr, sr) : sr;
+    const bg = da > 0 ? blend(dg, sg) : sg;
+    const bb = da > 0 ? blend(db, sb) : sb;
+    const mr = (1 - da) * sr + da * br;
+    const mg = (1 - da) * sg + da * bg;
+    const mb = (1 - da) * sb + da * bb;
+    const oa = sa + da * (1 - sa);
+    if (oa <= 0) continue;
+
+    bottom[i] = ((mr * sa + dr * da * (1 - sa)) / oa) * 255;
+    bottom[i + 1] = ((mg * sa + dg * da * (1 - sa)) / oa) * 255;
+    bottom[i + 2] = ((mb * sa + db * da * (1 - sa)) / oa) * 255;
+    bottom[i + 3] = oa * 255;
+  }
+}
 
 function pixelsEqual(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
   if (a.length !== b.length) return false;
@@ -225,8 +447,11 @@ export interface AppState {
   viewport: Viewport;
   tool: ToolId;
   brush: BrushSettings;
+  symmetry: SymmetryConfig;
+  dynamics: DynamicsConfig;
   primary: RGBA;
   secondary: RGBA;
+  swatches: RGBA[];
   /** 0..255 color match tolerance for the fill tool */
   fillTolerance: number;
   /** bump to force canvas redraw after in-place pixel mutation */
@@ -243,9 +468,16 @@ export interface AppState {
   // tool & brush & color
   setTool: (t: ToolId) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
+  setSymmetry: (patch: Partial<SymmetryConfig>) => void;
+  setDynamics: (patch: Partial<DynamicsConfig>) => void;
   setPrimary: (c: RGBA) => void;
   setSecondary: (c: RGBA) => void;
   swapColors: () => void;
+  addSwatchAction: () => void;
+  removeSwatchAction: (index: number) => void;
+  moveSwatchAction: (from: number, to: number) => void;
+  selectSwatch: (index: number) => void;
+  generateHarmony: (scheme: HarmonyScheme) => void;
 
   // viewport
   setViewport: (patch: Partial<Viewport>) => void;
@@ -316,8 +548,11 @@ export const useStore = create<AppState>((set, get) => ({
   viewport: { ...IDENTITY_VIEWPORT },
   tool: 'brush',
   brush: { ...DEFAULT_BRUSH },
+  symmetry: defaultSymmetry(1280, 720),
+  dynamics: defaultDynamics(),
   primary: { ...BLACK },
   secondary: { ...WHITE },
+  swatches: [],
   fillTolerance: 32,
   rev: 0,
   isStroking: false,
@@ -329,26 +564,53 @@ export const useStore = create<AppState>((set, get) => ({
     history.clear();
     activeStroke = null;
     activeMaskStroke = null;
-    set({ doc: createDocument(w, h, name), rev: get().rev + 1, isStroking: false, canUndo: false, canRedo: false });
+    set({
+      doc: createDocument(w, h, name),
+      symmetry: defaultSymmetry(w, h),
+      rev: get().rev + 1,
+      isStroking: false,
+      canUndo: false,
+      canRedo: false,
+    });
   },
   loadDocument: (doc) => {
     history.clear();
     activeStroke = null;
     activeMaskStroke = null;
-    set({ doc, rev: get().rev + 1, isStroking: false, canUndo: false, canRedo: false });
+    set({
+      doc,
+      symmetry: defaultSymmetry(doc.width, doc.height),
+      rev: get().rev + 1,
+      isStroking: false,
+      canUndo: false,
+      canRedo: false,
+    });
   },
 
   setTool: (t) => set({ tool: t }),
   setBrush: (patch) => set({ brush: { ...get().brush, ...patch } }),
+  setSymmetry: (patch) => set({ symmetry: { ...get().symmetry, ...patch } }),
+  setDynamics: (patch) => set({ dynamics: { ...get().dynamics, ...patch } }),
   setPrimary: (c) => set({ primary: c }),
   setSecondary: (c) => set({ secondary: c }),
   swapColors: () => set({ primary: get().secondary, secondary: get().primary }),
+  addSwatchAction: () => set({ swatches: addSwatch(get().swatches, get().primary) }),
+  removeSwatchAction: (index) => set({ swatches: removeSwatch(get().swatches, index) }),
+  moveSwatchAction: (from, to) => set({ swatches: moveSwatch(get().swatches, from, to) }),
+  selectSwatch: (index) => {
+    const color = get().swatches[index];
+    if (color) set({ primary: { ...color } });
+  },
+  generateHarmony: (scheme) => {
+    const colors = harmony(get().primary, scheme);
+    set({ swatches: colors.reduce((list, color) => addSwatch(list, color), get().swatches) });
+  },
 
   setViewport: (patch) => set({ viewport: { ...get().viewport, ...patch } }),
   resetViewport: () => set({ viewport: { ...IDENTITY_VIEWPORT } }),
 
   beginStroke: (s) => {
-    const { doc, brush, tool, primary, maskEditMode } = get();
+    const { doc, brush, tool, primary, maskEditMode, symmetry, dynamics } = get();
     const layer = activeLayer(doc);
     if (!layer || !layer.pixels || layer.locked || !layer.visible) return;
     if (maskEditMode) {
@@ -359,13 +621,20 @@ export const useStore = create<AppState>((set, get) => ({
       return;
     }
     const erase = tool === 'eraser';
-    const engine = new StrokeEngine(doc.width, doc.height, brush, erase);
+    const engine = new StoreStrokeEngine(
+      doc.width,
+      doc.height,
+      brush,
+      erase,
+      symmetry,
+      dynamics,
+    );
     engine.addSample(s);
     activeStroke = {
       engine,
       layerId: layer.id,
       before: layer.pixels.slice(),
-      color: erase ? primary : primary,
+      color: primary,
     };
     set({ isStroking: true, rev: get().rev + 1 });
   },
@@ -810,19 +1079,7 @@ export const useStore = create<AppState>((set, get) => ({
     const top = doc.layers[i];
     const bottom = doc.layers[i - 1];
     if (!top.pixels || !bottom.pixels) return;
-    // composite top over bottom (normal, respecting top opacity)
-    const tp = top.pixels, bp = bottom.pixels, op = top.opacity;
-    for (let o = 0; o < bp.length; o += 4) {
-      const sa = (tp[o + 3] / 255) * op;
-      if (sa <= 0) continue;
-      const da = bp[o + 3] / 255;
-      const oa = sa + da * (1 - sa);
-      if (oa <= 0) continue;
-      bp[o] = (tp[o] * sa + bp[o] * da * (1 - sa)) / oa;
-      bp[o + 1] = (tp[o + 1] * sa + bp[o + 1] * da * (1 - sa)) / oa;
-      bp[o + 2] = (tp[o + 2] * sa + bp[o + 2] * da * (1 - sa)) / oa;
-      bp[o + 3] = oa * 255;
-    }
+    compositeLayerPixelsIntoBottom(bottom.pixels, top);
     const layers = doc.layers.filter((l) => l.id !== id);
     set({ doc: { ...doc, layers, activeLayerId: bottom.id }, rev: get().rev + 1 });
   },

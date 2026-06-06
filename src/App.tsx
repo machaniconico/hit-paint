@@ -4,6 +4,8 @@ import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
 import type { AdjustmentSpec, BlendMode, ToolId } from './types';
 import type { AlignMode } from './core/layer-bounds';
+import type { SymmetryConfig } from './engine/symmetry';
+import type { HarmonyScheme } from './color/palette';
 import { BLEND_MODES } from './types';
 import { importPSD, exportPSD } from './io/psd';
 import { importCLIP, exportCLIP } from './io/clip';
@@ -68,6 +70,21 @@ const LAYER_EFFECT_BUTTONS: { kind: LayerEffectKind; label: string }[] = [
   { kind: 'drop-shadow', label: 'ドロップシャドウ' },
   { kind: 'stroke', label: '縁取り' },
   { kind: 'glow', label: '光彩' },
+];
+
+const SYMMETRY_MODES: { mode: SymmetryConfig['mode']; label: string }[] = [
+  { mode: 'none', label: 'なし' },
+  { mode: 'horizontal', label: '水平' },
+  { mode: 'vertical', label: '垂直' },
+  { mode: 'both', label: '両方' },
+  { mode: 'radial', label: '放射' },
+];
+
+const HARMONY_SCHEMES: { scheme: HarmonyScheme; label: string }[] = [
+  { scheme: 'complementary', label: '補色' },
+  { scheme: 'analogous', label: '類似' },
+  { scheme: 'triadic', label: '三色' },
+  { scheme: 'tetradic', label: '四色' },
 ];
 
 function screenToDoc(
@@ -247,6 +264,38 @@ export function App() {
             </div>
           </section>
 
+          <section className="panel palette-panel">
+            <h3>スウォッチ</h3>
+            <div className="swatch-actions">
+              <button className="mini" onClick={s.addSwatchAction}>追加</button>
+              <button className="mini" onClick={() => s.generateHarmony('complementary')}>補色</button>
+              <button className="mini" onClick={() => s.generateHarmony('analogous')}>類似</button>
+            </div>
+            <div className="swatches saved-swatches">
+              {s.swatches.map((color, index) => (
+                <button
+                  key={`${color.r}-${color.g}-${color.b}-${color.a}-${index}`}
+                  className="swatch"
+                  style={{ background: rgbaToHex(color), opacity: color.a / 255 }}
+                  title={`swatch ${index + 1}`}
+                  onClick={() => s.selectSwatch(index)}
+                  onDoubleClick={() => s.removeSwatchAction(index)}
+                />
+              ))}
+            </div>
+            <div className="harmony-grid">
+              {HARMONY_SCHEMES.map((item) => (
+                <button
+                  key={item.scheme}
+                  className="mini"
+                  onClick={() => s.generateHarmony(item.scheme)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section className="panel">
             <h3>ブラシ</h3>
             <label>サイズ <b>{s.brush.size}px</b>
@@ -270,6 +319,49 @@ export function App() {
               <input type="checkbox" checked={s.brush.pressureOpacity}
                 onChange={(e) => s.setBrush({ pressureOpacity: e.target.checked })} />
               筆圧→不透明度
+            </label>
+          </section>
+
+          <section className="panel">
+            <h3>ブラシ詳細</h3>
+            <label>サイズジッター <b>{Math.round((s.dynamics.sizeJitter ?? 0) * 100)}%</b>
+              <input type="range" min={0} max={100} value={(s.dynamics.sizeJitter ?? 0) * 100}
+                onChange={(e) => s.setDynamics({ sizeJitter: +e.target.value / 100 })} />
+            </label>
+            <label>不透明度ジッター <b>{Math.round((s.dynamics.opacityJitter ?? 0) * 100)}%</b>
+              <input type="range" min={0} max={100} value={(s.dynamics.opacityJitter ?? 0) * 100}
+                onChange={(e) => s.setDynamics({ opacityJitter: +e.target.value / 100 })} />
+            </label>
+            <label>散布 <b>{Math.round(s.dynamics.scatter ?? 0)}px</b>
+              <input type="range" min={0} max={100} value={s.dynamics.scatter ?? 0}
+                onChange={(e) => s.setDynamics({ scatter: +e.target.value })} />
+            </label>
+          </section>
+
+          <section className="panel symmetry-panel">
+            <h3>対称</h3>
+            <label>モード
+              <select
+                value={s.symmetry.mode}
+                onChange={(e) => s.setSymmetry({ mode: e.target.value as SymmetryConfig['mode'] })}
+              >
+                {SYMMETRY_MODES.map((item) => (
+                  <option key={item.mode} value={item.mode}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>分割 <b>{s.symmetry.slices ?? 6}</b>
+              <input
+                type="number"
+                min={2}
+                max={24}
+                step={1}
+                value={s.symmetry.slices ?? 6}
+                onChange={(e) => {
+                  const slices = Math.max(2, Math.trunc(Number(e.target.value) || 2));
+                  s.setSymmetry({ slices });
+                }}
+              />
             </label>
           </section>
 
