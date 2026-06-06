@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (368 tests)
+npm test           # vitest (386 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -60,8 +60,10 @@ npm run typecheck  # tsc --noEmit
 - **色変換 / モーションブラー** — RGB↔HSL 変換と色温度・色合い調整(`color/convert`)、
   方向性モーションブラーと放射(ズーム)ブラー(`filters/motion-blur`)。
 - **アンシャープ / 色置換** — 輪郭強調のアンシャープマスク(`filters/unsharp`、threshold付き)、
-  特定色の置換(`filters/replace-color`、tolerance/fuzziness で柔らか境界)。
-  ヒストグラム等化・ガンマ・モーション/放射ブラーはフィルターメニューに配線済み。
+  特定色の置換(`filters/replace-color`、tolerance/fuzziness で柔らか境界)。フィルターメニュー配線済み。
+- **液状化 / レンズ / ビネット** — 液状化ツール(`tools/liquify` の push/bloat/pinch、ツールバー配線済み)、
+  レンズ歪み(`filters/lens` の樽型/糸巻き型)、周辺減光ビネット(`filters/vignette`、着色対応)。
+  ヒストグラム等化・ガンマ・モーション/放射ブラーもフィルターメニューに配線済み。
 - **ベクターパス** — 三次ベジェのパス平坦化と塗り/ストロークのラスタライズ(`vector/path`)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
   nearest/bilinear リサンプル(`tools/resample`)、繰り返しタイル塗りとシームレス化(`tools/pattern`)。
@@ -115,7 +117,8 @@ src/
   filters/    index(基本フィルター) / curves / color-balance / histogram /
               convolve(エッジ/エンボス) / pixelate / noise / quantize(減色) /
               tone(等化・ガンマ) / motion-blur(方向・放射ブラー) /
-              unsharp(アンシャープ) / replace-color(色置換)
+              unsharp(アンシャープ) / replace-color(色置換) /
+              lens(レンズ歪み) / vignette(ビネット)
   color/      color(RGB<->HSV / hex) / convert(HSL・色温度) / palette(スウォッチ・配色ハーモニー)
   io/         psd / clip / png / files(DLとピッカー)
   state/      store(zustand 統合点)
