@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore } from './state/store';
+import { useStore, type LayerEffectKind } from './state/store';
 import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
 import type { AdjustmentSpec, BlendMode, ToolId } from './types';
@@ -62,6 +62,12 @@ const ALIGN_BUTTONS: { mode: AlignMode; label: string }[] = [
   { mode: 'top', label: '上' },
   { mode: 'vcenter', label: '中' },
   { mode: 'bottom', label: '下' },
+];
+
+const LAYER_EFFECT_BUTTONS: { kind: LayerEffectKind; label: string }[] = [
+  { kind: 'drop-shadow', label: 'ドロップシャドウ' },
+  { kind: 'stroke', label: '縁取り' },
+  { kind: 'glow', label: '光彩' },
 ];
 
 function screenToDoc(
@@ -536,6 +542,21 @@ export function App() {
               マスク編集
               <span>{s.maskEditMode ? 'キャンバス描画はマスクに作用' : '通常描画'}</span>
             </label>
+            <div className="layer-effects">
+              <h4>レイヤー効果</h4>
+              <div className="layer-effect-grid">
+                {LAYER_EFFECT_BUTTONS.map((item) => (
+                  <button
+                    key={item.kind}
+                    className="mini"
+                    disabled={!canFilterActive}
+                    onClick={() => s.applyLayerEffect(item.kind)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <ul>
               {[...s.doc.layers].reverse().map((l) => (
                 <li key={l.id} className={l.id === s.doc.activeLayerId ? 'layer active' : 'layer'}

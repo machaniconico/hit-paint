@@ -51,6 +51,14 @@ import { applyCurves, type CurvesOptions } from '../filters/curves';
 import { autoContrast, autoLevels, type AutoToneOptions } from '../filters/histogram';
 import { orderedDither, type OrderedDitherOptions } from '../filters/noise';
 import { pixelate, type PixelateOptions } from '../filters/pixelate';
+import {
+  dropShadow,
+  outerGlow,
+  strokeOutline,
+  type DropShadowOptions,
+  type OuterGlowOptions,
+  type StrokeOutlineOptions,
+} from '../core/layer-effects';
 
 type Maskless<T> = Omit<T, 'mask'>;
 
@@ -78,6 +86,15 @@ export interface FilterOptionMap {
 
 export type FilterName = keyof FilterOptionMap;
 export type FilterOptions = FilterOptionMap[FilterName];
+
+export interface LayerEffectOptionMap {
+  'drop-shadow': Partial<DropShadowOptions>;
+  stroke: Partial<StrokeOutlineOptions>;
+  glow: Partial<OuterGlowOptions>;
+}
+
+export type LayerEffectKind = keyof LayerEffectOptionMap;
+export type LayerEffectOptions = LayerEffectOptionMap[LayerEffectKind];
 
 /** Transient, non-reactive stroke state (kept out of the reactive store). */
 interface StrokeContext {
@@ -284,6 +301,7 @@ export interface AppState {
 
   // filters
   applyFilter: <T extends FilterName>(name: T, opts?: FilterOptionMap[T]) => void;
+  applyLayerEffect: <T extends LayerEffectKind>(kind: T, opts?: LayerEffectOptionMap[T]) => void;
 
   // history
   undo: () => void;
@@ -840,6 +858,55 @@ export const useStore = create<AppState>((set, get) => ({
   removeLayerFromGroupAction: (layerId, groupId) => {
     const { doc } = get();
     set({ doc: removeFromGroup(doc, layerId, groupId), rev: get().rev + 1 });
+  },
+  applyLayerEffect: (kind, opts) => {
+    const { doc, primary } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    let next: Uint8ClampedArray;
+
+    switch (kind) {
+      case 'drop-shadow': {
+        const effectOpts = opts as LayerEffectOptionMap['drop-shadow'] | undefined;
+        next = dropShadow(layer.pixels, doc.width, doc.height, {
+          dx: effectOpts?.dx ?? 4,
+          dy: effectOpts?.dy ?? 4,
+          blur: effectOpts?.blur ?? 4,
+          color: effectOpts?.color ?? BLACK,
+          opacity: effectOpts?.opacity ?? 0.5,
+        });
+        break;
+      }
+      case 'stroke': {
+        const effectOpts = opts as LayerEffectOptionMap['stroke'] | undefined;
+        next = strokeOutline(layer.pixels, doc.width, doc.height, {
+          size: effectOpts?.size ?? 2,
+          color: effectOpts?.color ?? primary,
+          position: effectOpts?.position,
+        });
+        break;
+      }
+      case 'glow': {
+        const effectOpts = opts as LayerEffectOptionMap['glow'] | undefined;
+        next = outerGlow(layer.pixels, doc.width, doc.height, {
+          blur: effectOpts?.blur ?? 6,
+          color: effectOpts?.color ?? primary,
+          opacity: effectOpts?.opacity ?? 0.6,
+        });
+        break;
+      }
+    }
+
+    if (!pixelsEqual(before, next)) {
+      const layerId = layer.id;
+      const layers = doc.layers.map((item) => (
+        item.id === layerId ? { ...item, pixels: next } : item
+      ));
+      set({ doc: { ...doc, layers } });
+      get().commitEdit('レイヤー効果', layerId, before);
+    }
   },
   applyFilter: (name, opts) => {
     const { doc } = get();

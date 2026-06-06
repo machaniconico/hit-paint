@@ -70,10 +70,10 @@ body {
 .swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
 .mini { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; padding: 0 6px; }
 .mini:disabled { opacity: 0.45; cursor: default; }
-.filter-grid, .selection-grid, .adjustment-grid, .transform-grid, .align-grid, .effect-kind-grid {
+.filter-grid, .selection-grid, .adjustment-grid, .transform-grid, .align-grid, .effect-kind-grid, .layer-effect-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
 }
-.filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini, .transform-grid .mini, .align-grid .mini, .effect-kind-grid .mini {
+.filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini, .transform-grid .mini, .align-grid .mini, .effect-kind-grid .mini, .layer-effect-grid .mini {
   min-height: 28px; padding: 4px 6px;
 }
 .filter-grid .wide { grid-column: 1 / -1; }
@@ -83,6 +83,9 @@ body {
 .adjustment-grid { grid-template-columns: 1fr; }
 .effect-kind-grid { margin-top: 8px; }
 .effect-kind-grid .active { border-color: var(--accent); background: #2f4055; }
+.layer-effects { margin: 8px 0; }
+.layer-effects h4 { font-size: 12px; margin: 0 0 6px; }
+.layer-effect-grid { grid-template-columns: 1fr; }
 .canvas-size { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .canvas-size input {
   width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--border);
