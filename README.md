@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (410 tests)
+npm test           # vitest (456 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -67,6 +67,10 @@ npm run typecheck  # tsc --noEmit
 - **ベクターパス** — 三次ベジェのパス平坦化と塗り/ストロークのラスタライズ(`vector/path`)。
   複合パス塗り(`rasterizeFillCompound`、evenodd/nonzero 巻き数規則で穴あき図形に対応)と
   破線ストローク(`rasterizeDashedStroke`、弧長ベースの dash パターン)もサポート。
+- **ベクターレイヤー** — 複数サブパス(塗り/線/破線)を保持する再編集レイヤー(`vector/vector-layer`、
+  `kind:'raster'` + `vectorData`)。編集で再ラスタライズ、Undo はデータごと復元、CLIP 往復で永続化。
+- **スマートシェイプ** — 矩形/角丸矩形/楕円/多角形/星/線のパラメトリック図形(`vector/shape`、
+  `shapeData`)。シェイプツールでドラッグ生成、パラメータ編集で非破壊に再ラスタライズ、CLIP 永続化。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
