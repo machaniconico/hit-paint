@@ -60,6 +60,7 @@ import {
   removeSwatch,
   type HarmonyScheme,
 } from '../color/palette';
+import { rasterizeFill, rasterizeStroke, type VectorPath } from '../vector/path';
 import {
   dropShadow,
   outerGlow,
@@ -444,6 +445,32 @@ function fitRotatedPixels(
   return out;
 }
 
+function compositeMaskWithColor(
+  target: Uint8ClampedArray,
+  color: RGBA,
+  mask: Uint8ClampedArray,
+  selection?: Uint8ClampedArray | null,
+): void {
+  const sourceAlpha = color.a / 255;
+  if (sourceAlpha <= 0) return;
+
+  for (let i = 0; i < mask.length; i += 1) {
+    let alpha = (mask[i] / 255) * sourceAlpha;
+    if (selection) alpha *= selection[i] / 255;
+    if (alpha <= 0) continue;
+
+    const offset = i * 4;
+    const destAlpha = target[offset + 3] / 255;
+    const outAlpha = alpha + destAlpha * (1 - alpha);
+    if (outAlpha <= 0) continue;
+
+    target[offset] = (color.r * alpha + target[offset] * destAlpha * (1 - alpha)) / outAlpha;
+    target[offset + 1] = (color.g * alpha + target[offset + 1] * destAlpha * (1 - alpha)) / outAlpha;
+    target[offset + 2] = (color.b * alpha + target[offset + 2] * destAlpha * (1 - alpha)) / outAlpha;
+    target[offset + 3] = outAlpha * 255;
+  }
+}
+
 export interface AppState {
   doc: PaintDocument;
   viewport: Viewport;
@@ -462,6 +489,7 @@ export interface AppState {
   canUndo: boolean;
   canRedo: boolean;
   maskEditMode: boolean;
+  penPath: VectorPath | null;
 
   // document lifecycle
   newDocument: (w?: number, h?: number, name?: string) => void;
@@ -494,6 +522,10 @@ export interface AppState {
   setFillTolerance: (n: number) => void;
   floodFillAt: (x: number, y: number) => void;
   applyGradient: (x0: number, y0: number, x1: number, y1: number) => void;
+  addPenPoint: (x: number, y: number) => void;
+  closePenPath: () => void;
+  commitPenPath: (mode: 'fill' | 'stroke', width?: number) => void;
+  cancelPenPath: () => void;
   effectBrushDab: (kind: 'blur' | 'sharpen' | 'dodge' | 'burn', x: number, y: number) => void;
   moveActiveLayer: (dx: number, dy: number) => void;
   placeTextAt: (x: number, y: number, text: string) => void;
@@ -561,6 +593,7 @@ export const useStore = create<AppState>((set, get) => ({
   canUndo: false,
   canRedo: false,
   maskEditMode: false,
+  penPath: null,
 
   newDocument: (w = 1280, h = 720, name = '無題') => {
     history.clear();
@@ -573,6 +606,7 @@ export const useStore = create<AppState>((set, get) => ({
       isStroking: false,
       canUndo: false,
       canRedo: false,
+      penPath: null,
     });
   },
   loadDocument: (doc) => {
@@ -586,6 +620,7 @@ export const useStore = create<AppState>((set, get) => ({
       isStroking: false,
       canUndo: false,
       canRedo: false,
+      penPath: null,
     });
   },
 
@@ -759,6 +794,44 @@ export const useStore = create<AppState>((set, get) => ({
       get().commitEdit('グラデーション', layer.id, before);
     }
   },
+  addPenPoint: (x, y) => {
+    const point = { x, y };
+    const path = get().penPath;
+    set({
+      penPath: path
+        ? { ...path, points: [...path.points, point] }
+        : { closed: false, points: [point] },
+    });
+  },
+  closePenPath: () => {
+    const path = get().penPath;
+    if (!path) return;
+    set({ penPath: { ...path, closed: true } });
+  },
+  commitPenPath: (mode, width = 2) => {
+    const { doc, penPath, primary } = get();
+    if (!penPath) return;
+
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked || !layer.visible) {
+      set({ penPath: null });
+      return;
+    }
+
+    const mask = mode === 'fill'
+      ? rasterizeFill(penPath, doc.width, doc.height)
+      : rasterizeStroke(penPath, doc.width, doc.height, width);
+    const before = layer.pixels.slice();
+    compositeMaskWithColor(layer.pixels, primary, mask, doc.selection?.mask ?? null);
+    set({ penPath: null });
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit(mode === 'fill' ? 'ペン塗り' : 'ペン線', layer.id, before);
+    } else {
+      set({ rev: get().rev + 1 });
+    }
+  },
+  cancelPenPath: () => set({ penPath: null }),
   effectBrushDab: (kind, x, y) => {
     const { doc, brush } = get();
     const layer = activeLayer(doc);

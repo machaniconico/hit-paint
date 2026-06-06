@@ -25,6 +25,7 @@ const TOOLS: { id: ToolId; label: string; key: string }[] = [
   { id: 'eraser', label: '消しゴム', key: 'E' },
   { id: 'fill', label: '塗りつぶし', key: 'G' },
   { id: 'gradient', label: 'グラデーション', key: 'Shift+G' },
+  { id: 'pen', label: 'ペン', key: 'P' },
   { id: 'text', label: 'テキスト', key: 'T' },
   { id: 'eyedropper', label: 'スポイト', key: 'I' },
   { id: 'select-rect', label: '矩形選択', key: 'M' },
@@ -103,6 +104,7 @@ function screenToDoc(
 
 export function App() {
   const s = useStore();
+  const [penStrokeWidth, setPenStrokeWidth] = useState(2);
   const [blurRadius, setBlurRadius] = useState(4);
   const [mosaicBlockSize, setMosaicBlockSize] = useState(4);
   const [quantizeMaxColors, setQuantizeMaxColors] = useState(16);
@@ -116,6 +118,8 @@ export function App() {
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
   const canMaskActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster');
   const canTransformActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
+  const canCommitPenFill = Boolean(s.penPath && s.penPath.closed && s.penPath.points.length >= 3);
+  const canCommitPenStroke = Boolean(s.penPath && s.penPath.points.length >= 2);
 
   useEffect(() => {
     setCanvasW(s.doc.width);
@@ -208,6 +212,13 @@ export function App() {
               e.stopPropagation();
               const point = stagePoint(e);
               s.magicWandSelectAt(point.x, point.y, s.fillTolerance, true);
+              return;
+            }
+            if (s.tool === 'pen') {
+              e.preventDefault();
+              e.stopPropagation();
+              const point = stagePoint(e);
+              s.addPenPoint(point.x, point.y);
               return;
             }
             if (s.tool === 'gradient' || s.tool === 'select-ellipse') {
@@ -376,6 +387,35 @@ export function App() {
               {s.doc.selection ? '選択範囲を描画色で塗る' : 'レイヤーを描画色で塗る'}
             </button>
           </section>
+
+          {s.tool === 'pen' && (
+            <section className="panel pen-panel">
+              <h3>ペン</h3>
+              <label>線幅 <b>{penStrokeWidth}px</b>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={penStrokeWidth}
+                  onChange={(e) => setPenStrokeWidth(Math.max(1, Math.trunc(Number(e.target.value) || 1)))}
+                />
+              </label>
+              <div className="pen-actions">
+                <button className="mini" disabled={!canCommitPenFill} onClick={() => s.commitPenPath('fill')}>
+                  塗りで確定
+                </button>
+                <button
+                  className="mini"
+                  disabled={!canCommitPenStroke}
+                  onClick={() => s.commitPenPath('stroke', penStrokeWidth)}
+                >
+                  線で確定
+                </button>
+                <button className="mini" disabled={!s.penPath} onClick={s.closePenPath}>閉じる</button>
+                <button className="mini" disabled={!s.penPath} onClick={s.cancelPenPath}>取消</button>
+              </div>
+            </section>
+          )}
 
           {activeTextData && (
             <section className="panel text-edit">

@@ -177,6 +177,7 @@ export type ToolId =
   | 'eraser'
   | 'fill'
   | 'gradient'
+  | 'pen'
   | 'text'
   | 'eyedropper'
   | 'select-rect'
