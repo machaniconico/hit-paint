@@ -61,16 +61,27 @@ body {
 .swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
 .mini { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; padding: 0 6px; }
 .mini:disabled { opacity: 0.45; cursor: default; }
-.filter-grid, .selection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.filter-grid .mini, .selection-grid .mini { min-height: 28px; padding: 4px 6px; }
+.filter-grid, .selection-grid, .adjustment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.filter-grid .mini, .selection-grid .mini, .adjustment-grid .mini { min-height: 28px; padding: 4px 6px; }
 .selection-grid { grid-template-columns: repeat(3, 1fr); }
+.adjustment-grid { grid-template-columns: 1fr; }
 
 .layers ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .layers h3 { align-items: flex-start; gap: 8px; }
 .layer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.mask-edit-toggle {
+  align-items: center; border: 1px solid var(--border); border-radius: 6px;
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 6px;
+}
+.mask-edit-toggle span { color: var(--accent); font-size: 11px; }
 .layer { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .layer.active { border-color: var(--accent); background: #2f4055; }
 .layer .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-kind {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--accent); font-size: 10px; line-height: 1; max-width: 70px;
+  overflow: hidden; padding: 2px 4px; text-overflow: ellipsis; white-space: nowrap;
+}
 .mask-indicator {
   border: 1px solid var(--accent); border-radius: 4px; color: var(--accent);
   font-size: 9px; line-height: 1; padding: 2px 3px; flex: 0 0 auto;

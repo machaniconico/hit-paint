@@ -27,6 +27,7 @@ import type { Database, SqlJsStatic, SqlValue } from 'sql.js';
 
 import { createDocument, createRasterLayer, uid } from '../core/document';
 import type {
+  AdjustmentSpec,
   BlendMode,
   ImportResult,
   Layer,
@@ -90,7 +91,7 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     db.run(
       'CREATE TABLE hitpaint_layers (' +
         'idx INT, id TEXT, name TEXT, kind TEXT, visible INT, opacity REAL, blend TEXT, ' +
-        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT);',
+        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT, adjustment TEXT);',
     );
 
     // Meta (single row) --------------------------------------------------
@@ -104,8 +105,8 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
     // Layers (in document order, bottom -> top) --------------------------
     const insertLayer = db.prepare(
       'INSERT INTO hitpaint_layers ' +
-        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        '(idx, id, name, kind, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children, adjustment) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
     );
     try {
       doc.layers.forEach((layer, index) => {
@@ -137,6 +138,7 @@ export async function exportCLIP(doc: PaintDocument): Promise<ArrayBuffer> {
           blob,
           mask,
           layer.children ? JSON.stringify(layer.children) : null,
+          layer.kind === 'adjustment' && layer.adjustment ? JSON.stringify(layer.adjustment) : null,
         ]);
       });
     } finally {
@@ -179,6 +181,47 @@ function toBlendMode(value: SqlValue): BlendMode {
     return value as BlendMode;
   }
   return 'normal';
+}
+
+function parseChildren(value: SqlValue): string[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.every((child) => typeof child === 'string')) {
+      return parsed;
+    }
+  } catch {
+    // Corrupt children metadata should not abort the whole import.
+  }
+  return [];
+}
+
+function parseAdjustment(value: SqlValue): AdjustmentSpec | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const { type, opts } = parsed as { type?: unknown; opts?: unknown };
+    if (
+      type !== 'brightness-contrast' &&
+      type !== 'invert' &&
+      type !== 'grayscale' &&
+      type !== 'hue-saturation' &&
+      type !== 'levels'
+    ) {
+      return null;
+    }
+    if (opts === undefined) return { type };
+    if (!opts || typeof opts !== 'object' || Array.isArray(opts)) return null;
+    const cleanOpts: Record<string, number> = {};
+    for (const [key, optValue] of Object.entries(opts)) {
+      if (typeof optValue !== 'number' || !Number.isFinite(optValue)) return null;
+      cleanOpts[key] = optValue;
+    }
+    return { type, opts: cleanOpts };
+  } catch {
+    return null;
+  }
 }
 
 /** Read the names of all user tables in the database. */
@@ -227,12 +270,20 @@ function importHitPaint(db: Database): ImportResult {
 
   // Layers (ordered by idx) --------------------------------------------
   const layers: Layer[] = [];
+  const hasKindColumn = tableHasColumn(db, 'hitpaint_layers', 'kind');
   const hasMaskColumn = tableHasColumn(db, 'hitpaint_layers', 'mask');
+  const hasChildrenColumn = tableHasColumn(db, 'hitpaint_layers', 'children');
+  const hasAdjustmentColumn = tableHasColumn(db, 'hitpaint_layers', 'adjustment');
   const layerRes = db.exec(
-    'SELECT id, name, kind, visible, opacity, blend, clipping, locked, rgba, ' +
+    'SELECT id, name, ' +
+      (hasKindColumn ? 'kind' : "'raster' AS kind") +
+      ', visible, opacity, blend, clipping, locked, rgba, ' +
       (hasMaskColumn ? 'mask' : 'NULL AS mask') +
-      ', children ' +
-      'FROM hitpaint_layers ORDER BY idx ASC;',
+      ', ' +
+      (hasChildrenColumn ? 'children' : 'NULL AS children') +
+      ', ' +
+      (hasAdjustmentColumn ? 'adjustment' : 'NULL AS adjustment') +
+      ' FROM hitpaint_layers ORDER BY idx ASC;',
   );
   if (layerRes.length > 0) {
     const expected = width * height * 4;
@@ -250,10 +301,10 @@ function importHitPaint(db: Database): ImportResult {
         lRgba,
         lMask,
         lChildren,
+        lAdjustment,
       ] = row;
-      // Trust the persisted `kind` rather than inferring it from blob size
-      // (which conflated 0×0 rasters with groups).
-      const kind = lKind === 'group' ? 'group' : 'raster';
+      const adjustment = parseAdjustment(lAdjustment);
+      const kind = lKind === 'group' ? 'group' : lKind === 'adjustment' && adjustment ? 'adjustment' : 'raster';
       const layer: Layer = {
         id: typeof lId === 'string' && lId ? lId : uid('layer'),
         name: typeof lName === 'string' ? lName : 'レイヤー',
@@ -271,8 +322,13 @@ function importHitPaint(db: Database): ImportResult {
         if (pixels.length !== expected) {
           warnings.push(`レイヤー「${layer.name}」の画素データが不正なため、空のレイヤーに置き換えました。`);
         }
+        if (lKind === 'adjustment' && !adjustment) {
+          warnings.push(`調整レイヤー「${layer.name}」の設定が不正なため、通常レイヤーとして読み込みました。`);
+        }
+      } else if (kind === 'group') {
+        layer.children = parseChildren(lChildren);
       } else {
-        layer.children = typeof lChildren === 'string' ? (JSON.parse(lChildren) as string[]) : [];
+        layer.adjustment = adjustment ?? undefined;
       }
       const mask = blobToMask(lMask);
       if (mask.length === expectedMask) {

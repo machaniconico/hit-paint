@@ -1,16 +1,18 @@
 import { create } from 'zustand';
 import type {
-  BrushSettings, Layer, LayerId, PaintDocument, PointerSample, RGBA, ToolId, Viewport,
+  AdjustmentSpec, BrushSettings, Layer, LayerId, PaintDocument, PointerSample, RGBA, ToolId, Viewport,
 } from '../types';
 import { DEFAULT_BRUSH, IDENTITY_VIEWPORT } from '../types';
 import {
-  createDocument, createRasterLayer, createLayerMask, createGroupLayer,
+  createAdjustmentLayer, createDocument, createRasterLayer, createLayerMask, createGroupLayer,
   findLayer, activeLayer, layerIndex,
 } from '../core/document';
+import { addToGroup, removeFromGroup } from '../core/group-ops';
 import { History, pixelSnapshotCommand } from '../core/history';
 import { StrokeEngine } from '../engine/brush';
 import { BLACK, WHITE } from '../color/color';
 import { floodFill, fillRegion } from '../tools/fill';
+import { paintMaskDab } from '../tools/mask-paint';
 import { featherSelection, growSelection, invertSelection, selectAll, shrinkSelection } from '../tools/selection';
 import { moveLayerPixels } from '../tools/transform';
 import type { Selection } from '../types';
@@ -64,6 +66,7 @@ interface StrokeContext {
   color: RGBA;
 }
 let activeStroke: StrokeContext | null = null;
+let activeMaskStroke: LayerId | null = null;
 export const getActiveStroke = () => activeStroke;
 
 const history = new History(60);
@@ -74,6 +77,25 @@ function pixelsEqual(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+function maskEquals(a: Uint8ClampedArray | undefined, b: Uint8ClampedArray | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function adjustmentLayerName(type: AdjustmentSpec['type']): string {
+  switch (type) {
+    case 'brightness-contrast': return '明るさ・コントラスト';
+    case 'invert': return '階調反転';
+    case 'grayscale': return 'グレースケール';
+    case 'hue-saturation': return '色相・彩度';
+    case 'levels': return 'レベル';
+  }
 }
 
 export interface AppState {
@@ -90,6 +112,7 @@ export interface AppState {
   isStroking: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  maskEditMode: boolean;
 
   // document lifecycle
   newDocument: (w?: number, h?: number, name?: string) => void;
@@ -110,6 +133,7 @@ export interface AppState {
   beginStroke: (s: PointerSample) => void;
   extendStroke: (s: PointerSample) => void;
   endStroke: () => void;
+  paintActiveLayerMaskDab: (x: number, y: number) => void;
   pickColorAt: (x: number, y: number) => void;
   setFillTolerance: (n: number) => void;
   floodFillAt: (x: number, y: number) => void;
@@ -128,6 +152,7 @@ export interface AppState {
 
   // layers
   addLayer: () => void;
+  addAdjustmentLayer: (type: AdjustmentSpec['type'], opts?: Record<string, number>) => void;
   removeLayer: (id: LayerId) => void;
   selectLayer: (id: LayerId) => void;
   setLayerProps: (id: LayerId, patch: Partial<Layer>) => void;
@@ -135,7 +160,10 @@ export interface AppState {
   mergeDown: (id: LayerId) => void;
   addLayerMask: (id: LayerId) => void;
   removeLayerMask: (id: LayerId) => void;
+  setMaskEditMode: (on: boolean) => void;
   addGroup: () => void;
+  moveLayerToGroupAction: (layerId: LayerId, groupId: LayerId) => void;
+  removeLayerFromGroupAction: (layerId: LayerId, groupId: LayerId) => void;
 
   // filters
   applyFilter: (name: FilterName, opts?: FilterOptions) => void;
@@ -160,15 +188,18 @@ export const useStore = create<AppState>((set, get) => ({
   isStroking: false,
   canUndo: false,
   canRedo: false,
+  maskEditMode: false,
 
   newDocument: (w = 1280, h = 720, name = '無題') => {
     history.clear();
     activeStroke = null;
+    activeMaskStroke = null;
     set({ doc: createDocument(w, h, name), rev: get().rev + 1, isStroking: false, canUndo: false, canRedo: false });
   },
   loadDocument: (doc) => {
     history.clear();
     activeStroke = null;
+    activeMaskStroke = null;
     set({ doc, rev: get().rev + 1, isStroking: false, canUndo: false, canRedo: false });
   },
 
@@ -182,9 +213,16 @@ export const useStore = create<AppState>((set, get) => ({
   resetViewport: () => set({ viewport: { ...IDENTITY_VIEWPORT } }),
 
   beginStroke: (s) => {
-    const { doc, brush, tool, primary } = get();
+    const { doc, brush, tool, primary, maskEditMode } = get();
     const layer = activeLayer(doc);
     if (!layer || !layer.pixels || layer.locked || !layer.visible) return;
+    if (maskEditMode) {
+      if (layer.kind !== 'raster') return;
+      get().paintActiveLayerMaskDab(s.x, s.y);
+      activeMaskStroke = layer.id;
+      set({ isStroking: true });
+      return;
+    }
     const erase = tool === 'eraser';
     const engine = new StrokeEngine(doc.width, doc.height, brush, erase);
     engine.addSample(s);
@@ -197,11 +235,20 @@ export const useStore = create<AppState>((set, get) => ({
     set({ isStroking: true, rev: get().rev + 1 });
   },
   extendStroke: (s) => {
+    if (activeMaskStroke) {
+      get().paintActiveLayerMaskDab(s.x, s.y);
+      return;
+    }
     if (!activeStroke) return;
     activeStroke.engine.addSample(s);
     set({ rev: get().rev + 1 });
   },
   endStroke: () => {
+    if (activeMaskStroke) {
+      activeMaskStroke = null;
+      set({ isStroking: false, canUndo: history.canUndo(), canRedo: history.canRedo() });
+      return;
+    }
     const st = activeStroke;
     if (!st) { set({ isStroking: false }); return; }
     const { doc } = get();
@@ -219,6 +266,44 @@ export const useStore = create<AppState>((set, get) => ({
     }
     activeStroke = null;
     set({ isStroking: false, rev: get().rev + 1, canUndo: history.canUndo(), canRedo: history.canRedo() });
+  },
+  paintActiveLayerMaskDab: (x, y) => {
+    const { doc, brush, tool } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked || !layer.visible) return;
+
+    const beforeMask = layer.mask?.slice();
+    const nextMask = beforeMask ? beforeMask.slice() : createLayerMask(doc.width, doc.height, 255);
+    paintMaskDab(nextMask, doc.width, doc.height, {
+      x,
+      y,
+      radius: Math.max(0.5, brush.size / 2),
+      hardness: brush.hardness,
+      value: tool === 'eraser' ? 0 : 255,
+    });
+    if (maskEquals(beforeMask, nextMask)) return;
+
+    const layerId = layer.id;
+    get().setLayerProps(layerId, { mask: nextMask });
+    const afterMask = nextMask.slice();
+    history.push({
+      label: 'マスク描画',
+      undo: () => {
+        const currentDoc = get().doc;
+        const layers = currentDoc.layers.map((item) => (
+          item.id === layerId ? { ...item, mask: beforeMask ? beforeMask.slice() : undefined } : item
+        ));
+        set({ doc: { ...currentDoc, layers }, rev: get().rev + 1 });
+      },
+      redo: () => {
+        const currentDoc = get().doc;
+        const layers = currentDoc.layers.map((item) => (
+          item.id === layerId ? { ...item, mask: afterMask.slice() } : item
+        ));
+        set({ doc: { ...currentDoc, layers }, rev: get().rev + 1 });
+      },
+    });
+    set({ canUndo: history.canUndo(), canRedo: history.canRedo() });
   },
   pickColorAt: (x, y) => {
     const { doc } = get();
@@ -318,6 +403,14 @@ export const useStore = create<AppState>((set, get) => ({
     layers.splice(idx, 0, layer);
     set({ doc: { ...doc, layers, activeLayerId: layer.id }, rev: get().rev + 1 });
   },
+  addAdjustmentLayer: (type, opts) => {
+    const { doc } = get();
+    const layer = createAdjustmentLayer(type, opts, adjustmentLayerName(type));
+    const idx = doc.activeLayerId ? layerIndex(doc, doc.activeLayerId) + 1 : doc.layers.length;
+    const layers = [...doc.layers];
+    layers.splice(idx, 0, layer);
+    set({ doc: { ...doc, layers, activeLayerId: layer.id }, rev: get().rev + 1 });
+  },
   removeLayer: (id) => {
     const { doc } = get();
     if (doc.layers.length <= 1) return;
@@ -378,6 +471,7 @@ export const useStore = create<AppState>((set, get) => ({
     const layers = doc.layers.map((l) => (l.id === id ? { ...l, mask: undefined } : l));
     set({ doc: { ...doc, layers }, rev: get().rev + 1 });
   },
+  setMaskEditMode: (on) => set({ maskEditMode: on }),
   addGroup: () => {
     const { doc } = get();
     const activeId = doc.activeLayerId;
@@ -386,6 +480,14 @@ export const useStore = create<AppState>((set, get) => ({
     const layers = [...doc.layers];
     layers.splice(insertAt, 0, group);
     set({ doc: { ...doc, layers, activeLayerId: group.id }, rev: get().rev + 1 });
+  },
+  moveLayerToGroupAction: (layerId, groupId) => {
+    const { doc } = get();
+    set({ doc: addToGroup(doc, layerId, groupId), rev: get().rev + 1 });
+  },
+  removeLayerFromGroupAction: (layerId, groupId) => {
+    const { doc } = get();
+    set({ doc: removeFromGroup(doc, layerId, groupId), rev: get().rev + 1 });
   },
   applyFilter: (name, opts) => {
     const { doc } = get();

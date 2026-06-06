@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from './state/store';
 import { Canvas } from './ui/Canvas';
 import { rgbaToHex, hexToRgba } from './color/color';
-import type { BlendMode, ToolId } from './types';
+import type { AdjustmentSpec, BlendMode, ToolId } from './types';
 import { BLEND_MODES } from './types';
 import { importPSD, exportPSD } from './io/psd';
 import { importCLIP, exportCLIP } from './io/clip';
@@ -29,6 +29,14 @@ const TOOLS: { id: ToolId; label: string; key: string }[] = [
   { id: 'pan', label: '手のひら', key: 'H' },
 ];
 
+const ADJUSTMENT_TYPES: { type: AdjustmentSpec['type']; label: string; opts?: Record<string, number> }[] = [
+  { type: 'brightness-contrast', label: '明るさ・コントラスト', opts: { brightness: 10, contrast: 10 } },
+  { type: 'invert', label: '階調反転' },
+  { type: 'grayscale', label: 'グレースケール' },
+  { type: 'hue-saturation', label: '色相・彩度', opts: { hue: 0, saturation: 20 } },
+  { type: 'levels', label: 'レベル', opts: { inBlack: 16, inWhite: 239, gamma: 1, outBlack: 0, outWhite: 255 } },
+];
+
 function screenToDoc(
   sx: number,
   sy: number,
@@ -48,6 +56,7 @@ export function App() {
   const [blurRadius, setBlurRadius] = useState(4);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
+  const canMaskActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster');
 
   const openFile = async () => {
     try {
@@ -214,6 +223,21 @@ export function App() {
             </div>
           </section>
 
+          <section className="panel adjustments">
+            <h3>調整レイヤー</h3>
+            <div className="adjustment-grid">
+              {ADJUSTMENT_TYPES.map((item) => (
+                <button
+                  key={item.type}
+                  className="mini"
+                  onClick={() => s.addAdjustmentLayer(item.type, item.opts)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section className="panel selection-tools">
             <h3>選択範囲</h3>
             <div className="selection-grid">
@@ -231,13 +255,23 @@ export function App() {
               レイヤー
               <span className="layer-actions">
                 <button className="mini" onClick={s.addLayer}>＋</button>
-                <button className="mini" disabled={!activeLayer}
+                <button className="mini" disabled={!canMaskActive || !activeLayer}
                   onClick={() => activeLayer && s.addLayerMask(activeLayer.id)}>マスク追加</button>
                 <button className="mini" disabled={!activeLayer?.mask}
                   onClick={() => activeLayer && s.removeLayerMask(activeLayer.id)}>マスク削除</button>
                 <button className="mini" onClick={s.addGroup}>グループ</button>
               </span>
             </h3>
+            <label className="check mask-edit-toggle">
+              <input
+                type="checkbox"
+                checked={s.maskEditMode}
+                disabled={!canMaskActive}
+                onChange={(e) => s.setMaskEditMode(e.target.checked)}
+              />
+              マスク編集
+              <span>{s.maskEditMode ? 'キャンバス描画はマスクに作用' : '通常描画'}</span>
+            </label>
             <ul>
               {[...s.doc.layers].reverse().map((l) => (
                 <li key={l.id} className={l.id === s.doc.activeLayerId ? 'layer active' : 'layer'}
@@ -245,6 +279,12 @@ export function App() {
                   <input type="checkbox" checked={l.visible}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => s.setLayerProps(l.id, { visible: e.target.checked })} />
+                  {l.kind === 'adjustment' && (
+                    <span className="layer-kind" title="調整レイヤー">
+                      {l.adjustment?.type ?? 'adjustment'}
+                    </span>
+                  )}
+                  {l.kind === 'group' && <span className="layer-kind" title="グループ">group</span>}
                   <span className="name">{l.name}</span>
                   {l.mask && <span className="mask-indicator" title="レイヤーマスクあり">MASK</span>}
                   <select value={l.blendMode}

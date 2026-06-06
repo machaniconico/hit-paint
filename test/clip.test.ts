@@ -1,10 +1,57 @@
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
+import initSqlJs from 'sql.js';
 
-import { createDocument, createGroupLayer } from '../src/core/document';
+import { createAdjustmentLayer, createDocument, createGroupLayer } from '../src/core/document';
 import { exportCLIP, importCLIP } from '../src/io/clip';
 
 /** SQLite file header magic: "SQLite format 3\0" (16 bytes). */
 const SQLITE_MAGIC = 'SQLite format 3\x00';
+
+async function createLegacyClipWithoutKindOrAdjustment(): Promise<ArrayBuffer> {
+  const SQL = await initSqlJs({
+    locateFile: () => path.join(process.cwd(), 'node_modules/sql.js/dist/sql-wasm.wasm'),
+  });
+  const db = new SQL.Database();
+  try {
+    db.run('CREATE TABLE hitpaint_meta (width INT, height INT, dpi REAL, name TEXT);');
+    db.run(
+      'CREATE TABLE hitpaint_layers (' +
+        'idx INT, id TEXT, name TEXT, visible INT, opacity REAL, blend TEXT, ' +
+        'clipping INT, locked INT, w INT, h INT, rgba BLOB, mask BLOB, children TEXT);',
+    );
+    db.run('INSERT INTO hitpaint_meta (width, height, dpi, name) VALUES (?, ?, ?, ?);', [
+      2,
+      1,
+      144,
+      'legacy',
+    ]);
+    db.run(
+      'INSERT INTO hitpaint_layers ' +
+        '(idx, id, name, visible, opacity, blend, clipping, locked, w, h, rgba, mask, children) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+      [
+        0,
+        'legacy-layer',
+        'legacy raster',
+        1,
+        0.75,
+        'screen',
+        1,
+        0,
+        2,
+        1,
+        new Uint8Array([10, 20, 30, 40, 50, 60, 70, 80]),
+        new Uint8Array([255, 128]),
+        null,
+      ],
+    );
+    const bytes = db.export();
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  } finally {
+    db.close();
+  }
+}
 
 describe('CLIP (.clip) round-trip', () => {
   it('exports a valid SQLite database and re-imports it losslessly', async () => {
@@ -94,6 +141,45 @@ describe('CLIP (.clip) round-trip', () => {
     expect(Array.from(importedMasked!.mask!)).toEqual(Array.from(masked.mask));
     expect(importedGroup?.children).toEqual([background.id, masked.id]);
     expect(importedBackground?.mask).toBeUndefined();
+  });
+
+  it('round-trips adjustment layer kind and settings', async () => {
+    const doc = createDocument(4, 3);
+    const adjustment = createAdjustmentLayer(
+      'brightness-contrast',
+      { brightness: 0.125, contrast: -0.5 },
+      'tone tweak',
+    );
+    adjustment.opacity = 0.6;
+    doc.layers.push(adjustment);
+    doc.activeLayerId = adjustment.id;
+
+    const buffer = await exportCLIP(doc);
+    const result = await importCLIP(buffer);
+
+    const importedAdjustment = result.doc.layers.find((layer) => layer.id === adjustment.id);
+    expect(importedAdjustment?.kind).toBe('adjustment');
+    expect(importedAdjustment?.adjustment?.type).toBe('brightness-contrast');
+    expect(importedAdjustment?.adjustment?.opts).toEqual({ brightness: 0.125, contrast: -0.5 });
+    expect(importedAdjustment?.adjustment?.opts?.brightness).toBeCloseTo(0.125, 5);
+    expect(importedAdjustment?.adjustment?.opts?.contrast).toBeCloseTo(-0.5, 5);
+    expect(importedAdjustment?.pixels).toBeUndefined();
+  });
+
+  it('imports legacy HIT Paint clips without kind or adjustment columns', async () => {
+    const buffer = await createLegacyClipWithoutKindOrAdjustment();
+    const result = await importCLIP(buffer);
+
+    expect(result.doc.width).toBe(2);
+    expect(result.doc.height).toBe(1);
+    expect(result.doc.dpi).toBe(144);
+    expect(result.doc.layers).toHaveLength(1);
+    expect(result.doc.layers[0].kind).toBe('raster');
+    expect(result.doc.layers[0].blendMode).toBe('screen');
+    expect(result.doc.layers[0].opacity).toBeCloseTo(0.75, 5);
+    expect(result.doc.layers[0].clipping).toBe(true);
+    expect(Array.from(result.doc.layers[0].pixels!)).toEqual([10, 20, 30, 40, 50, 60, 70, 80]);
+    expect(Array.from(result.doc.layers[0].mask!)).toEqual([255, 128]);
   });
 
   it('returns a blank document with a warning for an unreadable file', async () => {
