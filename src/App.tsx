@@ -11,6 +11,7 @@ import { importPSD, exportPSD } from './io/psd';
 import { importCLIP, exportCLIP } from './io/clip';
 import { exportPNG, importImageFile } from './io/png';
 import { pickFile, downloadBlob } from './io/files';
+import type { ShapeKind } from './vector/shape';
 
 function guessMime(name: string): string {
   if (name.endsWith('.png')) return 'image/png';
@@ -83,6 +84,15 @@ const LAYER_EFFECT_BUTTONS: { kind: LayerEffectKind; label: string }[] = [
   { kind: 'bevel-emboss', label: 'ベベル・エンボス' },
 ];
 
+const SHAPE_KIND_OPTIONS: { kind: ShapeKind; label: string }[] = [
+  { kind: 'rect', label: '矩形' },
+  { kind: 'rounded-rect', label: '角丸矩形' },
+  { kind: 'ellipse', label: '楕円' },
+  { kind: 'polygon', label: '多角形' },
+  { kind: 'star', label: '星形' },
+  { kind: 'line', label: '線' },
+];
+
 const SYMMETRY_MODES: { mode: SymmetryConfig['mode']; label: string }[] = [
   { mode: 'none', label: 'なし' },
   { mode: 'horizontal', label: '水平' },
@@ -129,6 +139,7 @@ export function App() {
   const toolDrag = useRef<ToolDrag | null>(null);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
   const activeTextData = activeLayer?.textData;
+  const activeShapeData = activeLayer?.shapeData;
   const canFilterActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
   const canMaskActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster');
   const canTransformActive = Boolean(activeLayer?.pixels && activeLayer.kind === 'raster' && !activeLayer.locked);
@@ -508,9 +519,18 @@ export function App() {
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('grayscale')}>グレースケール</button>
               <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('channel-mixer', {
+                  monochrome: true,
+                  red: { r: 0.299, g: 0.587, b: 0.114 },
+                  green: { r: 0, g: 0, b: 0 },
+                  blue: { r: 0, g: 0, b: 0 },
+                })}>チャンネルミキサー</button>
+              <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('sharpen', { amount: 0.75 })}>シャープ</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('unsharp', { amount: 1, radius: 1 })}>アンシャープ</button>
+              <button className="mini" disabled={!canFilterActive}
+                onClick={() => s.applyFilter('clarity', { amount: 0.5, radius: 3 })}>クラリティ</button>
               <button className="mini" disabled={!canFilterActive}
                 onClick={() => s.applyFilter('replace-color', {
                   from: s.primary,
@@ -803,6 +823,23 @@ export function App() {
               マスク編集
               <span>{s.maskEditMode ? 'キャンバス描画はマスクに作用' : '通常描画'}</span>
             </label>
+            {activeShapeData && (
+              <div className="layer-effects">
+                <h4>シェイプ種類</h4>
+                <div className="layer-effect-grid">
+                  {SHAPE_KIND_OPTIONS.map((item) => (
+                    <button
+                      key={item.kind}
+                      className="mini"
+                      aria-pressed={activeShapeData.shape === item.kind}
+                      onClick={() => s.updateActiveShapeLayer({ shape: item.kind })}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="layer-effects">
               <h4>レイヤー効果</h4>
               <div className="layer-effect-grid">

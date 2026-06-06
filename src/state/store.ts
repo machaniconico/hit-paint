@@ -54,6 +54,8 @@ import {
   threshold,
   type ThresholdOptions,
 } from '../filters';
+import { channelMixer, type ChannelMixerOptions } from '../filters/channel-mixer';
+import { clarity, type ClarityOptions } from '../filters/clarity';
 import { adjustColorBalance, gradientMap, type ColorBalanceOptions, type GradientMapOptions } from '../filters/color-balance';
 import { emboss, sobelEdge } from '../filters/convolve';
 import { applyCurves, type CurvesOptions } from '../filters/curves';
@@ -122,6 +124,8 @@ export interface FilterOptionMap {
   'replace-color': { from: RGBA; to: RGBA; tolerance: number; fuzziness?: number };
   lens: LensDistortOptions;
   vignette: VignetteOptions;
+  'channel-mixer': ChannelMixerOptions;
+  clarity: ClarityOptions;
 }
 
 export type FilterName = keyof FilterOptionMap;
@@ -1850,6 +1854,28 @@ export const useStore = create<AppState>((set, get) => ({
         const filterOpts = opts as FilterOptionMap['vignette'] | undefined;
         const vignetteOpts = { amount: 0.5, ...filterOpts } as VignetteOptions;
         vignette(layer.pixels, doc.width, doc.height, vignetteOpts, selectionMask ?? undefined);
+        break;
+      }
+      case 'channel-mixer': {
+        const filterOpts = opts as FilterOptionMap['channel-mixer'] | undefined;
+        channelMixer(layer.pixels, doc.width, doc.height, {
+          monochrome: false,
+          red: { r: 1, g: 0, b: 0 },
+          green: { r: 0, g: 1, b: 0 },
+          blue: { r: 0, g: 0, b: 1 },
+          ...filterOpts,
+          mask: selectionMask,
+        });
+        break;
+      }
+      case 'clarity': {
+        const filterOpts = opts as FilterOptionMap['clarity'] | undefined;
+        clarity(layer.pixels, doc.width, doc.height, {
+          amount: 0.5,
+          radius: 3,
+          ...filterOpts,
+          mask: selectionMask,
+        });
         break;
       }
     }
