@@ -147,6 +147,15 @@ export interface BrushSettings {
   pressureSize: boolean;
   /** map pen pressure to opacity */
   pressureOpacity: boolean;
+  /**
+   * .sut 配布ブラシ由来の任意形状 tip(US-3804)。truthy のとき数式 dab の代わりに
+   * この tip 形状をスタンプする。undefined/null なら従来通り。
+   */
+  tip?: import('../engine/tip-stamp').TipAlpha | null;
+  /** 筆圧→サイズ倍率カーブ(.sut)。なければ素通り。 */
+  pressureSizeCurve?: import('../io/sut-pressure').PressureCurve | null;
+  /** 筆圧→flow 倍率カーブ(.sut)。なければ素通り。 */
+  pressureFlowCurve?: import('../io/sut-pressure').PressureCurve | null;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {

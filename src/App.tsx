@@ -250,7 +250,35 @@ export function App() {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
-      await s.importSutBrush(new Uint8Array(buf));
+      // tip PNG をブラウザ API で RGBA 化するデコーダ。失敗時は null(tip 無しで続行)。
+      const decodeTip = async (
+        png: Uint8Array,
+      ): Promise<{ data: Uint8ClampedArray; width: number; height: number } | null> => {
+        try {
+          if (typeof createImageBitmap === 'undefined' || typeof document === 'undefined') {
+            return null;
+          }
+          const pngCopy = new Uint8Array(png.length);
+          pngCopy.set(png);
+          const blob = new Blob([pngCopy.buffer], { type: 'image/png' });
+          const bitmap = await createImageBitmap(blob);
+          const canvas = document.createElement('canvas');
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            bitmap.close();
+            return null;
+          }
+          ctx.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          return { data: imageData.data, width: canvas.width, height: canvas.height };
+        } catch {
+          return null;
+        }
+      };
+      await s.importSutBrush(new Uint8Array(buf), { decodeTip });
     } catch {
       // Ignore invalid SUT files; the import control is best-effort.
     }

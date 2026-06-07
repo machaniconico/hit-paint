@@ -111,6 +111,14 @@ import { serializeProject, deserializeProject } from '../io/project';
 import { extractPalette, type Swatch } from '../color/swatches';
 import { kaleidoscope, type KaleidoscopeOptions } from '../tools/kaleidoscope';
 import { parseSutBrush, sutToBrushSettings } from '../io/sut';
+import { extractPngFromBlob } from '../io/sut-tip';
+import { stampTip, pngRgbaToTipAlpha } from '../engine/tip-stamp';
+import {
+  findPressureCurves,
+  samplePressureCurve,
+  curveIsFlat,
+  curveLooksLikePressureResponse,
+} from '../io/sut-pressure';
 import {
   addPreset,
   createPresetLibrary,
@@ -330,6 +338,29 @@ class StoreStrokeEngine {
     const points = this.symmetry.mode === 'none'
       ? [{ x: dab.x, y: dab.y }]
       : mirrorPoints(dab.x, dab.y, this.symmetry);
+
+    // .sut 配布ブラシの任意形状 tip があれば、数式 dab の代わりに tip をスタンプする。
+    const tip = this.brush.tip;
+    if (tip) {
+      // 筆圧カーブがあれば size/flow に倍率を掛ける(無ければ素通り)。
+      const sizeCurve = this.brush.pressureSizeCurve;
+      const flowCurve = this.brush.pressureFlowCurve;
+      const sizeScale = sizeCurve ? samplePressureCurve(sizeCurve, pressure) : 1;
+      const flowScale = flowCurve ? samplePressureCurve(flowCurve, pressure) : 1;
+      const tipSize = dab.size * sizeScale;
+      const tipFlow = flow * flowScale;
+      for (const point of points) {
+        stampTip(this.coverage, this.width, this.height, tip, {
+          x: point.x,
+          y: point.y,
+          size: tipSize,
+          rotation: 0,
+          flow: tipFlow,
+        });
+      }
+      return;
+    }
+
     for (const point of points) {
       this.stampCoverage(point.x, point.y, dab.size, flow);
     }
@@ -686,7 +717,14 @@ export interface AppState {
   // tool & brush & color
   setTool: (t: ToolId) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
-  importSutBrush: (bytes: Uint8Array) => Promise<void>;
+  importSutBrush: (
+    bytes: Uint8Array,
+    opts?: {
+      decodeTip?: (
+        png: Uint8Array,
+      ) => Promise<{ data: Uint8ClampedArray; width: number; height: number } | null>;
+    },
+  ) => Promise<void>;
   applyBrushPreset: (id: string) => void;
   setSymmetry: (patch: Partial<SymmetryConfig>) => void;
   setDynamics: (patch: Partial<DynamicsConfig>) => void;
@@ -915,9 +953,44 @@ export const useStore = create<AppState>((set, get) => ({
 
   setTool: (t) => set({ tool: t }),
   setBrush: (patch) => set({ brush: { ...get().brush, ...patch } }),
-  importSutBrush: async (bytes) => {
+  importSutBrush: async (bytes, opts) => {
     const sut = await parseSutBrush(bytes);
     const settings = sutToBrushSettings(sut);
+
+    // 任意形状 tip(PNG)を取り出してデコード。失敗しても throw せず tip 無しで続行。
+    if (opts?.decodeTip) {
+      try {
+        const png = extractPngFromBlob(bytes);
+        if (png) {
+          const decoded = await opts.decodeTip(png);
+          if (decoded && decoded.width > 0 && decoded.height > 0) {
+            settings.tip = pngRgbaToTipAlpha(decoded.data, decoded.width, decoded.height);
+          }
+        }
+      } catch {
+        // tip デコード失敗は無視(従来通りの数式 dab で動く)。
+      }
+    }
+
+    // 筆圧カーブを抽出。findPressureCurves は .sut ファイル全体を署名走査するため
+    // SQLite ページデータ等への偽陽性マッチを拾いうる(実サンプルでは全ファイル共通の
+    // 非単調カーブが観測された)。これを倍率カーブに使うと筆圧でブラシ径/濃度が erratic に
+    // 歪むため、curveLooksLikePressureResponse(単調非減少+有意スパン)で本物らしいもの
+    // だけに絞ってから割り当てる。
+    try {
+      const curves = findPressureCurves(bytes).filter(
+        (curve) => !curveIsFlat(curve) && curveLooksLikePressureResponse(curve),
+      );
+      if (curves.length >= 2) {
+        settings.pressureSizeCurve = curves[0];
+        settings.pressureFlowCurve = curves[1];
+      } else if (curves.length === 1) {
+        settings.pressureSizeCurve = curves[0];
+      }
+    } catch {
+      // カーブ抽出失敗は無視。
+    }
+
     set((state) => ({
       brush: { ...state.brush, ...settings },
       brushPresets: addPreset(state.brushPresets, {
