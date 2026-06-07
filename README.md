@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (680 tests)
+npm test           # vitest (710 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -93,6 +93,10 @@ npm run typecheck  # tsc --noEmit
   色域別 HSL 調整のセレクティブカラー(`filters/selective-color`)、テクスチャ/散布ブラシ先端生成(`engine/brush-texture`)。
 - **CLIP配布ブラシ(.sut)取り込み** — CLIP STUDIO の `.sut`(SQLite)を解析してブラシ設定を取り込み(`io/sut`、サイズ/不透明度/フロー/硬さ/間隔等を `BrushSettings` へマッピング)、
   先端 PNG 画像を抽出(`io/sut-tip`、TAR/PNG スキャン)、名前付きブラシプリセットとして登録(`engine/brush-presets`)。CLIP 独自エンジンの完全再現ではなく近似取り込み。
+- **CLIP配布ブラシの実描画化** — 取り込んだ `.sut` の先端画像を実際の描画に反映。先端 PNG を 0..1 アルファ化(`engine/tip-stamp` の `pngRgbaToTipAlpha`、CLIP の黒=インク慣習対応)し、
+  最長辺=サイズでアスペクト保持スケール・回転・bilinear・max-combine でカバレッジへスタンプ(`stampTip`)、spacing 間隔で経路に連打(`engine/stroke-stamp`)。
+  筆圧カーブ(`io/sut-pressure`、署名 `[12][N][16]+float64BE`)をデコードしてサイズ/フローへ適用。SQLite 全体走査の偽陽性カーブは単調性ガード(`curveLooksLikePressureResponse`)で除外。
+  先端を持たない `.sut` は従来の数式ブラシにフォールバック(後方互換、バイト不変)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
