@@ -246,6 +246,15 @@ export function App() {
     };
     reader.readAsText(file);
   };
+  const loadSutBrushFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      await s.importSutBrush(new Uint8Array(buf));
+    } catch {
+      // Ignore invalid SUT files; the import control is best-effort.
+    }
+  };
 
   const stagePoint = (e: React.PointerEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -453,6 +462,26 @@ export function App() {
                 onChange={(e) => s.setBrush({ pressureOpacity: e.target.checked })} />
               筆圧→不透明度
             </label>
+            <label>
+              SUT読込
+              <input
+                type="file"
+                accept=".sut"
+                onChange={(e) => {
+                  void loadSutBrushFile(e.currentTarget.files?.[0]);
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+            {s.brushPresets.presets.map((preset) => (
+              <button
+                key={preset.id}
+                className="mini wide"
+                onClick={() => s.applyBrushPreset(preset.id)}
+              >
+                {preset.name}
+              </button>
+            ))}
           </section>
 
           <section className="panel">

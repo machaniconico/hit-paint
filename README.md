@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (662 tests)
+npm test           # vitest (680 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -91,6 +91,8 @@ npm run typecheck  # tsc --noEmit
   dark channel prior による除霧(`filters/dehaze`)、領域複製のクローンスタンプ(`tools/clone-stamp`、フォールオフ/不透明度)。
 - **ガイド / セレクティブカラー / テクスチャブラシ** — ガイド・グリッド・スナップ(`core/guides`)、
   色域別 HSL 調整のセレクティブカラー(`filters/selective-color`)、テクスチャ/散布ブラシ先端生成(`engine/brush-texture`)。
+- **CLIP配布ブラシ(.sut)取り込み** — CLIP STUDIO の `.sut`(SQLite)を解析してブラシ設定を取り込み(`io/sut`、サイズ/不透明度/フロー/硬さ/間隔等を `BrushSettings` へマッピング)、
+  先端 PNG 画像を抽出(`io/sut-tip`、TAR/PNG スキャン)、名前付きブラシプリセットとして登録(`engine/brush-presets`)。CLIP 独自エンジンの完全再現ではなく近似取り込み。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、

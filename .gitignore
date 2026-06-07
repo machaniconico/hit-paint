@@ -4,3 +4,6 @@ dist/
 .DS_Store
 
 .omc/
+
+# CLIP STUDIO 配布素材(.sut 等)は再配布不可のためコミットしない(解析用ローカル置き場)
+assetpass/

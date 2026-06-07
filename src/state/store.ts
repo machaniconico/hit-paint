@@ -110,6 +110,13 @@ import {
 import { serializeProject, deserializeProject } from '../io/project';
 import { extractPalette, type Swatch } from '../color/swatches';
 import { kaleidoscope, type KaleidoscopeOptions } from '../tools/kaleidoscope';
+import { parseSutBrush, sutToBrushSettings } from '../io/sut';
+import {
+  addPreset,
+  createPresetLibrary,
+  type BrushPreset,
+  type BrushPresetLibrary,
+} from '../engine/brush-presets';
 
 type Maskless<T> = Omit<T, 'mask'>;
 type DuotoneColor = DuotoneOptions['shadow'] | RGBA;
@@ -645,6 +652,7 @@ export interface AppState {
   viewport: Viewport;
   tool: ToolId;
   brush: BrushSettings;
+  brushPresets: BrushPresetLibrary;
   symmetry: SymmetryConfig;
   dynamics: DynamicsConfig;
   primary: RGBA;
@@ -678,6 +686,8 @@ export interface AppState {
   // tool & brush & color
   setTool: (t: ToolId) => void;
   setBrush: (patch: Partial<BrushSettings>) => void;
+  importSutBrush: (bytes: Uint8Array) => Promise<void>;
+  applyBrushPreset: (id: string) => void;
   setSymmetry: (patch: Partial<SymmetryConfig>) => void;
   setDynamics: (patch: Partial<DynamicsConfig>) => void;
   setPrimary: (c: RGBA) => void;
@@ -787,6 +797,7 @@ export const useStore = create<AppState>((set, get) => ({
   viewport: { ...IDENTITY_VIEWPORT },
   tool: 'brush',
   brush: { ...DEFAULT_BRUSH },
+  brushPresets: createPresetLibrary(),
   symmetry: defaultSymmetry(1280, 720),
   dynamics: defaultDynamics(),
   primary: { ...BLACK },
@@ -904,6 +915,22 @@ export const useStore = create<AppState>((set, get) => ({
 
   setTool: (t) => set({ tool: t }),
   setBrush: (patch) => set({ brush: { ...get().brush, ...patch } }),
+  importSutBrush: async (bytes) => {
+    const sut = await parseSutBrush(bytes);
+    const settings = sutToBrushSettings(sut);
+    set((state) => ({
+      brush: { ...state.brush, ...settings },
+      brushPresets: addPreset(state.brushPresets, {
+        name: sut.name || 'Imported SUT Brush',
+        settings,
+      }),
+    }));
+  },
+  applyBrushPreset: (id) => {
+    const preset: BrushPreset | undefined = get().brushPresets.presets.find((item) => item.id === id);
+    if (!preset) return;
+    set({ brush: { ...get().brush, ...preset.settings } });
+  },
   setSymmetry: (patch) => set({ symmetry: { ...get().symmetry, ...patch } }),
   setDynamics: (patch) => set({ dynamics: { ...get().dynamics, ...patch } }),
   setPrimary: (c) => set({ primary: c }),
