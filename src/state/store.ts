@@ -113,6 +113,8 @@ import { kaleidoscope, type KaleidoscopeOptions } from '../tools/kaleidoscope';
 import { parseSutBrush, sutToBrushSettings } from '../io/sut';
 import { extractPngFromBlob } from '../io/sut-tip';
 import { stampTip, pngRgbaToTipAlpha } from '../engine/tip-stamp';
+import { tipStampAngle } from '../engine/stroke-stamp';
+import { stampScatteredTip } from '../engine/tip-scatter';
 import {
   findPressureCurves,
   samplePressureCurve,
@@ -277,6 +279,8 @@ class StoreStrokeEngine {
   private last: PointerSample | null = null;
   private residual = 0;
   private dabStep = 0;
+  /** ストローク進行方向(ラジアン)。先頭シード打点など方向未定義時は null(US-3904)。 */
+  private lastDirAngle: number | null = null;
 
   constructor(
     width: number,
@@ -349,14 +353,41 @@ class StoreStrokeEngine {
       const flowScale = flowCurve ? samplePressureCurve(flowCurve, pressure) : 1;
       const tipSize = dab.size * sizeScale;
       const tipFlow = flow * flowScale;
+      // 回転 = 方向追従(lastDirAngle) + 基準角 + 角度ジッタ(US-3904 ライブ配線)。
+      // 新フィールド未設定なら tipStampAngle は 0 を返し、従来(rotation:0)と同一。
+      const rotation = tipStampAngle({
+        segmentAngle: this.lastDirAngle ?? undefined,
+        followStroke: this.brush.tipFollowStroke,
+        baseAngle: this.brush.tipAngle,
+        angleJitter: this.brush.tipAngleJitter,
+        seed: 1,
+        step: this.dabStep,
+      });
+      const scatter = this.brush.tipScatter ?? 0;
+      const density = this.brush.tipScatterDensity ?? 1;
       for (const point of points) {
-        stampTip(this.coverage, this.width, this.height, tip, {
-          x: point.x,
-          y: point.y,
-          size: tipSize,
-          rotation: 0,
-          flow: tipFlow,
-        });
+        if (scatter > 0 && density > 1) {
+          // 散布スタンプ(決定論: seed+dabStep で打点ごとに散布が変わる)。
+          stampScatteredTip(this.coverage, this.width, this.height, tip, {
+            x: point.x,
+            y: point.y,
+            size: tipSize,
+            rotation,
+            flow: tipFlow,
+            scatter,
+            density,
+            seed: 1,
+            step: this.dabStep,
+          });
+        } else {
+          stampTip(this.coverage, this.width, this.height, tip, {
+            x: point.x,
+            y: point.y,
+            size: tipSize,
+            rotation,
+            flow: tipFlow,
+          });
+        }
       }
       return;
     }
@@ -379,7 +410,15 @@ class StoreStrokeEngine {
     const dist = Math.sqrt(dx * dx + dy * dy);
     const avgPressure = (prev.pressure + s.pressure) / 2;
     const size = (this.brush.pressureSize ? Math.max(0.05, avgPressure) : 1) * this.brush.size;
-    const step = Math.max(0.5, this.brush.spacing * size);
+    // tip + 筆圧サイズカーブがある場合のみ、stampStroke と同様に step へ筆圧倍率を
+    // 反映する(US-3904)。tip 無し or カーブ無しのときは従来計算と完全一致を保つ。
+    const sizeCurve = this.brush.tip ? this.brush.pressureSizeCurve : undefined;
+    const stepSize = sizeCurve ? size * samplePressureCurve(sizeCurve, avgPressure) : size;
+    const step = Math.max(0.5, this.brush.spacing * stepSize);
+    // セグメントの進行方向を更新(方向追従回転に使う。dist=0 なら向き不定で据え置き)。
+    if (dist > 0) {
+      this.lastDirAngle = Math.atan2(dy, dx);
+    }
     let traveled = -this.residual;
     while (traveled + step <= dist) {
       traveled += step;

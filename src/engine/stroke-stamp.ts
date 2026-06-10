@@ -8,12 +8,62 @@
  * セグメントを traveled で歩進して stampTip を呼ぶ。residual を次セグメントへ
  * 繰り越し、複数回呼び出し(ストローク分割)でも連続描画と一致するよう設計する。
  *
- * すべて純粋・決定論的(乱数なし)。Canvas/DOM に依存しない。
+ * すべて純粋・決定論的(乱数なし。ジッタは seed 付き整数ハッシュ PRNG)。
+ * Canvas/DOM に依存しない。
  */
 
 import type { PointerSample } from '../types';
 import { stampTip, type TipAlpha } from './tip-stamp';
 import { samplePressureCurve, type PressureCurve } from '../io/sut-pressure';
+
+/**
+ * seed と step から決定論的に 0..1 未満の値を返す整数ハッシュ(US-3901)。
+ *
+ * mulberry32 系の 1 ショット版。同じ (seed, step) は必ず同じ値を返す。
+ * Math.random は使わない(テストの決定論性のため)。
+ */
+function hash01(seed: number, step: number): number {
+  let h = (seed | 0) ^ Math.imul((step | 0) + 0x6d2b79f5, 0x9e3779b9);
+  h = Math.imul(h ^ (h >>> 16), 0x21f0aaad);
+  h = Math.imul(h ^ (h >>> 15), 0x735a2d97);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * tip スタンプ 1 打点分の回転角を算出する純粋関数(US-3901)。
+ *
+ * 戻り値 = (followStroke && segmentAngle 指定 ? segmentAngle : 0)
+ *        + (baseAngle ?? 0)
+ *        + ジッタ(angleJitter>0 のとき seed+step から決定論的に [-angleJitter, +angleJitter])。
+ */
+export function tipStampAngle(opts: {
+  /** ストローク進行方向(ラジアン, atan2(dy,dx))。未指定なら方向追従しない。 */
+  segmentAngle?: number;
+  /** true かつ segmentAngle 指定時のみ進行方向を加える。 */
+  followStroke?: boolean;
+  /** ブラシ固有の基準角(ラジアン, 既定0)。 */
+  baseAngle?: number;
+  /** ジッタ振幅(ラジアン, 既定0)。 */
+  angleJitter?: number;
+  /** ジッタ用 seed(既定1)。 */
+  seed?: number;
+  /** 打点インデックス(既定0)。seed と合わせてジッタを決定。 */
+  step?: number;
+}): number {
+  const follow =
+    opts.followStroke === true && opts.segmentAngle != null ? opts.segmentAngle : 0;
+  const base = opts.baseAngle ?? 0;
+
+  const jitterAmp = opts.angleJitter ?? 0;
+  let jitter = 0;
+  if (jitterAmp > 0) {
+    const r = hash01(opts.seed ?? 1, opts.step ?? 0);
+    jitter = (r * 2 - 1) * jitterAmp;
+  }
+
+  return follow + base + jitter;
+}
 
 export interface StampStrokeParams {
   /** 基準サイズ(px, tip の最長辺)。 */
@@ -30,6 +80,14 @@ export interface StampStrokeParams {
   pressureFlow?: PressureCurve | null;
   /** 継続用(既定 0)。前回呼び出しの返り residual を渡す。 */
   residualStart?: number;
+  /** true ならストローク進行方向(atan2)を回転に加える(US-3901, 既定 false)。 */
+  followStroke?: boolean;
+  /** ブラシ固有の基準角(ラジアン, 既定 0)。rotation に加算される。 */
+  baseAngle?: number;
+  /** 角度ジッタ振幅(ラジアン, 既定 0)。seed+打点番号から決定論的に付与。 */
+  angleJitter?: number;
+  /** 角度ジッタ用 seed(既定 1)。 */
+  seed?: number;
 }
 
 /**
@@ -64,15 +122,32 @@ export function stampStroke(
     return { residual };
   }
 
-  // 指定筆圧でのスタンプを 1 発打つ。
-  const stampAt = (x: number, y: number, pr: number): number => {
+  // 打点通し番号(全セグメント通算)。角度ジッタの決定論に使う(US-3901)。
+  let stepIndex = 0;
+
+  // 指定筆圧でのスタンプを 1 発打つ。segmentAngle はそのセグメントの進行方向
+  // (atan2(dy,dx))。単一サンプル時など方向が無いときは undefined。
+  const stampAt = (x: number, y: number, pr: number, segmentAngle?: number): number => {
     const effSize = size * (pressureSize ? samplePressureCurve(pressureSize, pr) : 1);
     const effFlow = baseFlow * (pressureFlow ? samplePressureCurve(pressureFlow, pr) : 1);
-    stampTip(coverage, cw, ch, tip, { x, y, size: effSize, rotation, flow: effFlow });
+    // 従来の rotation に方向追従/基準角/ジッタを加算する。新オプション未指定なら
+    // tipStampAngle は 0 を返し、従来(rotation のみ)と完全に同一結果になる。
+    const effRotation =
+      rotation +
+      tipStampAngle({
+        segmentAngle,
+        followStroke: params.followStroke,
+        baseAngle: params.baseAngle,
+        angleJitter: params.angleJitter,
+        seed: params.seed,
+        step: stepIndex,
+      });
+    stepIndex += 1;
+    stampTip(coverage, cw, ch, tip, { x, y, size: effSize, rotation: effRotation, flow: effFlow });
     return effSize;
   };
 
-  // 単一サンプル(移動なし) → その点に 1 スタンプ。
+  // 単一サンプル(移動なし) → その点に 1 スタンプ(方向なし)。
   if (samples.length === 1) {
     const s = samples[0];
     stampAt(s.x, s.y, s.pressure ?? 0);
@@ -94,6 +169,8 @@ export function stampStroke(
 
     const ux = dx / segLen;
     const uy = dy / segLen;
+    // このセグメントの進行方向(方向追従回転に使う)。
+    const segmentAngle = Math.atan2(dy, dx);
 
     // セグメント内を traveled で歩進。residual はセグメント先頭までの距離余り。
     let traveled = residual;
@@ -104,7 +181,7 @@ export function stampStroke(
       const y = a.y + uy * traveled;
       const pr = (a.pressure ?? 0) + ((b.pressure ?? 0) - (a.pressure ?? 0)) * t;
 
-      const effSize = stampAt(x, y, pr);
+      const effSize = stampAt(x, y, pr, segmentAngle);
       const step = Math.max(0.5, spacing * effSize);
       traveled += step;
     }

@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (710 tests)
+npm test           # vitest (734 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -97,6 +97,9 @@ npm run typecheck  # tsc --noEmit
   最長辺=サイズでアスペクト保持スケール・回転・bilinear・max-combine でカバレッジへスタンプ(`stampTip`)、spacing 間隔で経路に連打(`engine/stroke-stamp`)。
   筆圧カーブ(`io/sut-pressure`、署名 `[12][N][16]+float64BE`)をデコードしてサイズ/フローへ適用。SQLite 全体走査の偽陽性カーブは単調性ガード(`curveLooksLikePressureResponse`)で除外。
   先端を持たない `.sut` は従来の数式ブラシにフォールバック(後方互換、バイト不変)。
+- **tip ブラシの描き味向上** — 先端画像のストローク方向追従回転 + 決定論的角度ジッタ(`engine/stroke-stamp` の `tipStampAngle`、seed/step ベースの自前 PRNG)、
+  散布/スプレー(`engine/tip-scatter` の `scatterOffsets`/`stampScatteredTip`、面積一様の円盤分布)。`.sut` の回転/スプレー設定を `BrushSettings`
+  (`tipAngle`/`tipScatter`/`tipScatterDensity` 等)へマッピングし、ライブ描画エンジンと UI(方向追従トグル・散布スライダ)に配線。tip 無しブラシはバイト不変。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、

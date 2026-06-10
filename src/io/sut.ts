@@ -240,9 +240,10 @@ export async function parseSutBrush(bytes: Uint8Array): Promise<SutBrush> {
 }
 
 export function sutToBrushSettings(brush: SutBrush): BrushSettings {
-  return {
+  const size = Math.max(1, brush.size);
+  const settings: BrushSettings = {
     shape: brush.antiAlias > 0 ? 'soft' : 'pixel',
-    size: Math.max(1, brush.size),
+    size,
     opacity: clamp(brush.opacity / 100, 0, 1),
     flow: clamp(brush.flow / 100, 0, 1),
     hardness: clamp(brush.hardness / 100, 0, 1),
@@ -250,4 +251,28 @@ export function sutToBrushSettings(brush: SutBrush): BrushSettings {
     pressureSize: true,
     pressureOpacity: true,
   };
+
+  // --- Wave37: tip 描き味の任意フィールド(意味がある時だけ付与し後方互換を保つ) ---
+
+  // BrushRotation は CLIP 上の度数表記とみなしラジアンへ変換する。
+  // 0(既定)のときは undefined のまま残し、従来挙動と区別しない。
+  if (brush.rotation !== 0 && Number.isFinite(brush.rotation)) {
+    settings.tipAngle = (brush.rotation * Math.PI) / 180;
+  }
+
+  // tipFollowStroke(進行方向追従)は CLIP のスカラー設定からは確実に判別
+  // できないため、ここでは付与しない(既定 false 扱い。将来拡張で判別予定)。
+
+  if (brush.useSpray) {
+    // BrushSpraySize の単位は不定(粒子径 or 散布幅らしき値が混在)なので、
+    // 散布半径として「ブラシ径の 2 倍まで」を上限に px へそのまま写像する。
+    // ブラシ径を大きく超える散布は HIT Paint 側では破綻しやすいための保守的上限。
+    settings.tipScatter = clamp(brush.spraySize, 0, size * 2);
+
+    // BrushSprayDensity も単位不定(粒子数 or % らしき値)。1 打点あたりの
+    // スタンプ数として 1..16 へ丸める。16 はスタンプ連打コストの実用上限。
+    settings.tipScatterDensity = Math.max(1, Math.min(16, Math.round(brush.sprayDensity)));
+  }
+
+  return settings;
 }

@@ -156,6 +156,16 @@ export interface BrushSettings {
   pressureSizeCurve?: import('../io/sut-pressure').PressureCurve | null;
   /** 筆圧→flow 倍率カーブ(.sut)。なければ素通り。 */
   pressureFlowCurve?: import('../io/sut-pressure').PressureCurve | null;
+  /** tip の基準回転(ラジアン)。 */
+  tipAngle?: number;
+  /** tip をストローク進行方向へ追従回転させる。 */
+  tipFollowStroke?: boolean;
+  /** tip 回転の角度ジッタ(ラジアン振幅)。 */
+  tipAngleJitter?: number;
+  /** tip 散布半径(px)。 */
+  tipScatter?: number;
+  /** 1打点あたりの散布スタンプ数。 */
+  tipScatterDensity?: number;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {

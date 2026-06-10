@@ -490,6 +490,24 @@ export function App() {
                 onChange={(e) => s.setBrush({ pressureOpacity: e.target.checked })} />
               筆圧→不透明度
             </label>
+            {s.brush.tip ? (
+              <>
+                {/* tip ブラシ専用の描き味設定(US-3904)。tip 無しブラシには表示しない。 */}
+                <label className="check">
+                  <input type="checkbox" checked={s.brush.tipFollowStroke ?? false}
+                    onChange={(e) => s.setBrush({ tipFollowStroke: e.target.checked })} />
+                  方向追従
+                </label>
+                <label>散布半径 <b>{Math.round(s.brush.tipScatter ?? 0)}px</b>
+                  <input type="range" min={0} max={100} value={s.brush.tipScatter ?? 0}
+                    onChange={(e) => s.setBrush({ tipScatter: +e.target.value })} />
+                </label>
+                <label>散布数 <b>{s.brush.tipScatterDensity ?? 1}</b>
+                  <input type="range" min={1} max={16} value={s.brush.tipScatterDensity ?? 1}
+                    onChange={(e) => s.setBrush({ tipScatterDensity: +e.target.value })} />
+                </label>
+              </>
+            ) : null}
             <label>
               SUT読込
               <input
