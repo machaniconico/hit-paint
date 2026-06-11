@@ -80,7 +80,7 @@ import { unsharpMask } from '../filters/unsharp';
 import { vignette, type VignetteOptions } from '../filters/vignette';
 import { autoWhiteBalance, type WhiteBalanceOptions } from '../filters/white-balance';
 import { generateGradient, type GradientSpec } from '../engine/gradient';
-import { mirrorPoints, type SymmetryConfig } from '../engine/symmetry';
+import { mirrorPoints, mirrorPointsWithMeta, type SymmetryConfig } from '../engine/symmetry';
 import { applyDynamics, type DynamicsConfig } from '../engine/brush-dynamics';
 import { worleyField, worleyToGrayscale } from '../engine/cellular';
 import { generateNoiseField, noiseToGrayscale } from '../engine/perlin';
@@ -115,12 +115,7 @@ import { extractPngFromBlob } from '../io/sut-tip';
 import { stampTip, pngRgbaToTipAlpha } from '../engine/tip-stamp';
 import { tipStampAngle } from '../engine/stroke-stamp';
 import { stampScatteredTip } from '../engine/tip-scatter';
-import {
-  findPressureCurves,
-  samplePressureCurve,
-  curveIsFlat,
-  curveLooksLikePressureResponse,
-} from '../io/sut-pressure';
+import { samplePressureCurve, selectBrushPressureCurves } from '../io/sut-pressure';
 import {
   addPreset,
   createPresetLibrary,
@@ -339,9 +334,6 @@ class StoreStrokeEngine {
 
     const opacityScale = this.brush.opacity > 0 ? dab.opacity / this.brush.opacity : 1;
     const flow = this.brush.flow * opacityPressure * opacityScale;
-    const points = this.symmetry.mode === 'none'
-      ? [{ x: dab.x, y: dab.y }]
-      : mirrorPoints(dab.x, dab.y, this.symmetry);
 
     // .sut 配布ブラシの任意形状 tip があれば、数式 dab の代わりに tip をスタンプする。
     const tip = this.brush.tip;
@@ -365,14 +357,24 @@ class StoreStrokeEngine {
       });
       const scatter = this.brush.tipScatter ?? 0;
       const density = this.brush.tipScatterDensity ?? 1;
-      for (const point of points) {
+      // symmetry が有効な場合、各鏡映コピーへは回転角も鏡映変換して渡す(US-4004)。
+      // mode='none' は単一点 {flip:false, rotate:0} なので実回転 = rotation のまま
+      // 従来と完全一致する。
+      const metaPoints = this.symmetry.mode === 'none'
+        ? [{ x: dab.x, y: dab.y, flip: false, rotate: 0 }]
+        : mirrorPointsWithMeta(dab.x, dab.y, this.symmetry);
+      for (const point of metaPoints) {
+        // 鏡映(flip)なら角度は rotate - θ、回転コピーなら rotate + θ に写る。
+        const pointRotation = point.flip ? point.rotate - rotation : point.rotate + rotation;
         if (scatter > 0 && density > 1) {
           // 散布スタンプ(決定論: seed+dabStep で打点ごとに散布が変わる)。
+          // 散布 seed はミラー点 index で変えない: 全鏡映コピーで同一の散布
+          // パターンを使うことで対称性を保つ(意図的な設計判断, US-4004)。
           stampScatteredTip(this.coverage, this.width, this.height, tip, {
             x: point.x,
             y: point.y,
             size: tipSize,
-            rotation,
+            rotation: pointRotation,
             flow: tipFlow,
             scatter,
             density,
@@ -384,7 +386,7 @@ class StoreStrokeEngine {
             x: point.x,
             y: point.y,
             size: tipSize,
-            rotation,
+            rotation: pointRotation,
             flow: tipFlow,
           });
         }
@@ -392,6 +394,10 @@ class StoreStrokeEngine {
       return;
     }
 
+    // tip 無し経路: 従来どおり mirrorPoints のまま(バイト不変を厳守)。
+    const points = this.symmetry.mode === 'none'
+      ? [{ x: dab.x, y: dab.y }]
+      : mirrorPoints(dab.x, dab.y, this.symmetry);
     for (const point of points) {
       this.stampCoverage(point.x, point.y, dab.size, flow);
     }
@@ -1011,15 +1017,11 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
 
-    // 筆圧カーブを抽出。findPressureCurves は .sut ファイル全体を署名走査するため
-    // SQLite ページデータ等への偽陽性マッチを拾いうる(実サンプルでは全ファイル共通の
-    // 非単調カーブが観測された)。これを倍率カーブに使うと筆圧でブラシ径/濃度が erratic に
-    // 歪むため、curveLooksLikePressureResponse(単調非減少+有意スパン)で本物らしいもの
-    // だけに絞ってから割り当てる。
+    // 筆圧カーブを抽出。選択ロジック(厳密 Effector 抽出 + 従来署名走査への
+    // フォールバック、偽陽性/恒等カーブのガード)は selectBrushPressureCurves に
+    // 集約されている(US-4003/US-4004)。実ファイルでの結果は従来フィルタと不変。
     try {
-      const curves = findPressureCurves(bytes).filter(
-        (curve) => !curveIsFlat(curve) && curveLooksLikePressureResponse(curve),
-      );
+      const curves = selectBrushPressureCurves(bytes);
       if (curves.length >= 2) {
         settings.pressureSizeCurve = curves[0];
         settings.pressureFlowCurve = curves[1];

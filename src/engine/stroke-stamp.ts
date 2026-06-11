@@ -7,6 +7,10 @@
  * 既存 engine と同じ歩進ロジック(step = max(0.5, spacing * effSize))を踏襲し、
  * セグメントを traveled で歩進して stampTip を呼ぶ。residual を次セグメントへ
  * 繰り越し、複数回呼び出し(ストローク分割)でも連続描画と一致するよう設計する。
+ * angleJitter>0 のときは打点通し番号もずれてはいけないため、戻り値の
+ * nextStepIndex を次回呼び出しの stepIndexStart に渡すこと(US-4001)。
+ * residual と nextStepIndex の両方を引き継げば、分割呼び出しは一括呼び出しと
+ * バイト同一の coverage を生成する。
  *
  * すべて純粋・決定論的(乱数なし。ジッタは seed 付き整数ハッシュ PRNG)。
  * Canvas/DOM に依存しない。
@@ -35,7 +39,7 @@ function hash01(seed: number, step: number): number {
  *
  * 戻り値 = (followStroke && segmentAngle 指定 ? segmentAngle : 0)
  *        + (baseAngle ?? 0)
- *        + ジッタ(angleJitter>0 のとき seed+step から決定論的に [-angleJitter, +angleJitter])。
+ *        + ジッタ(angleJitter>0 のとき seed+step から決定論的に半開区間 [-angleJitter, +angleJitter))。
  */
 export function tipStampAngle(opts: {
   /** ストローク進行方向(ラジアン, atan2(dy,dx))。未指定なら方向追従しない。 */
@@ -88,6 +92,12 @@ export interface StampStrokeParams {
   angleJitter?: number;
   /** 角度ジッタ用 seed(既定 1)。 */
   seed?: number;
+  /**
+   * 打点通し番号の開始値(既定 0)。ストロークを分割して呼ぶときに前回の
+   * 戻り値 nextStepIndex を渡すと、angleJitter>0 でもジッタ列が一括呼び出しと
+   * 一致する(US-4001)。0 のままなら従来挙動と完全同一。
+   */
+  stepIndexStart?: number;
 }
 
 /**
@@ -99,7 +109,9 @@ export interface StampStrokeParams {
  *   effSize = size * (pressureSize ? samplePressureCurve(pressureSize, pr) : 1)。
  *   effFlow = (flow??1) * (pressureFlow ? samplePressureCurve(pressureFlow, pr) : 1)。
  * - step = max(0.5, spacing * effSize)。effSize はそのスタンプ点の筆圧から算出。
- * - residual を次セグメントへ繰り越し、最後に { residual } を返す。
+ * - residual を次セグメントへ繰り越し、最後に { residual, nextStepIndex } を返す。
+ *   nextStepIndex は stepIndexStart + 今回の打点数。分割呼び出し時は residual と
+ *   合わせて次回へ渡すこと(US-4001)。
  */
 export function stampStroke(
   coverage: Float32Array,
@@ -108,7 +120,7 @@ export function stampStroke(
   tip: TipAlpha,
   samples: PointerSample[],
   params: StampStrokeParams,
-): { residual: number } {
+): { residual: number; nextStepIndex: number } {
   const size = params.size;
   const spacing = params.spacing;
   const baseFlow = params.flow ?? 1;
@@ -118,12 +130,13 @@ export function stampStroke(
 
   let residual = params.residualStart ?? 0;
 
-  if (samples.length === 0) {
-    return { residual };
-  }
-
   // 打点通し番号(全セグメント通算)。角度ジッタの決定論に使う(US-3901)。
-  let stepIndex = 0;
+  // 分割呼び出し時は stepIndexStart で前回からの続きを指定できる(US-4001)。
+  let stepIndex = params.stepIndexStart ?? 0;
+
+  if (samples.length === 0) {
+    return { residual, nextStepIndex: stepIndex };
+  }
 
   // 指定筆圧でのスタンプを 1 発打つ。segmentAngle はそのセグメントの進行方向
   // (atan2(dy,dx))。単一サンプル時など方向が無いときは undefined。
@@ -151,7 +164,7 @@ export function stampStroke(
   if (samples.length === 1) {
     const s = samples[0];
     stampAt(s.x, s.y, s.pressure ?? 0);
-    return { residual };
+    return { residual, nextStepIndex: stepIndex };
   }
 
   // 各セグメントを spacing 間隔で歩進する。
@@ -190,5 +203,5 @@ export function stampStroke(
     residual = traveled - segLen;
   }
 
-  return { residual };
+  return { residual, nextStepIndex: stepIndex };
 }

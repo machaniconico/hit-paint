@@ -263,15 +263,19 @@ export function sutToBrushSettings(brush: SutBrush): BrushSettings {
   // tipFollowStroke(進行方向追従)は CLIP のスカラー設定からは確実に判別
   // できないため、ここでは付与しない(既定 false 扱い。将来拡張で判別予定)。
 
-  if (brush.useSpray) {
+  // spraySize<=0 のスプレーは散布半径ゼロで意味を持たないため、
+  // 「意味がある時のみ付与」の方針に合わせて両フィールドとも未設定のまま残す(US-4002)。
+  if (brush.useSpray && brush.spraySize > 0) {
     // BrushSpraySize の単位は不定(粒子径 or 散布幅らしき値が混在)なので、
     // 散布半径として「ブラシ径の 2 倍まで」を上限に px へそのまま写像する。
     // ブラシ径を大きく超える散布は HIT Paint 側では破綻しやすいための保守的上限。
     settings.tipScatter = clamp(brush.spraySize, 0, size * 2);
 
     // BrushSprayDensity も単位不定(粒子数 or % らしき値)。1 打点あたりの
-    // スタンプ数として 1..16 へ丸める。16 はスタンプ連打コストの実用上限。
-    settings.tipScatterDensity = Math.max(1, Math.min(16, Math.round(brush.sprayDensity)));
+    // スタンプ数として 2..16 へ丸める。下限が 2 なのはエンジン側の散布条件が
+    // 「tipScatter>0 かつ density>1」であり、1 に丸めると spray ON の .sut でも
+    // 散布が一切効かなくなるため(US-4002)。16 はスタンプ連打コストの実用上限。
+    settings.tipScatterDensity = Math.max(2, Math.min(16, Math.round(brush.sprayDensity)));
   }
 
   return settings;

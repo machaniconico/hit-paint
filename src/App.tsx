@@ -498,6 +498,15 @@ export function App() {
                     onChange={(e) => s.setBrush({ tipFollowStroke: e.target.checked })} />
                   方向追従
                 </label>
+                {/* tipAngle/tipAngleJitter はラジアン保持なので、UI 上は度数と相互変換する(US-4002)。 */}
+                <label>基準回転 <b>{Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI)}°</b>
+                  <input type="range" min={0} max={360} value={Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI)}
+                    onChange={(e) => s.setBrush({ tipAngle: (+e.target.value * Math.PI) / 180 })} />
+                </label>
+                <label>角度ジッタ <b>{Math.round(((s.brush.tipAngleJitter ?? 0) * 180) / Math.PI)}°</b>
+                  <input type="range" min={0} max={180} value={Math.round(((s.brush.tipAngleJitter ?? 0) * 180) / Math.PI)}
+                    onChange={(e) => s.setBrush({ tipAngleJitter: (+e.target.value * Math.PI) / 180 })} />
+                </label>
                 <label>散布半径 <b>{Math.round(s.brush.tipScatter ?? 0)}px</b>
                   <input type="range" min={0} max={100} value={s.brush.tipScatter ?? 0}
                     onChange={(e) => s.setBrush({ tipScatter: +e.target.value })} />

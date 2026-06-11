@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (734 tests)
+npm test           # vitest (760 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -100,6 +100,10 @@ npm run typecheck  # tsc --noEmit
 - **tip ブラシの描き味向上** — 先端画像のストローク方向追従回転 + 決定論的角度ジッタ(`engine/stroke-stamp` の `tipStampAngle`、seed/step ベースの自前 PRNG)、
   散布/スプレー(`engine/tip-scatter` の `scatterOffsets`/`stampScatteredTip`、面積一様の円盤分布)。`.sut` の回転/スプレー設定を `BrushSettings`
   (`tipAngle`/`tipScatter`/`tipScatterDensity` 等)へマッピングし、ライブ描画エンジンと UI(方向追従トグル・散布スライダ)に配線。tip 無しブラシはバイト不変。
+- **tip ブラシ忠実度の仕上げ** — `stampStroke` の分割呼び出しジッタ連続性(`stepIndexStart`/`nextStepIndex` で分割=一括一致)、
+  spray ON の `.sut` で散布が必ず効く density 写像(下限2)と基準回転/角度ジッタの UI スライダ、
+  筆圧 Effector の厳密スコープ抽出(`io/sut-pressure` の `findEffectorCurves`/`selectBrushPressureCurves`、前段 u32 レイアウト実ファイル検証済み・偽陽性を構造的に除外)、
+  対称描画での tip 回転鏡映(`engine/symmetry` の `mirrorPointsWithMeta`、flip/rotate メタで各ミラー点の実回転を導出)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
