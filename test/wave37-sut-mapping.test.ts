@@ -93,7 +93,7 @@ describe('wave37 SUT -> BrushSettings tip マッピング (US-3903)', () => {
     expect(Number.isInteger(settings.tipScatterDensity!)).toBe(true);
   });
 
-  it('tipScatter はブラシ径の 2 倍にクランプされ、density は 1..16 に収まる', async () => {
+  it('tipScatter はブラシ径の 2 倍にクランプされ、density は 2..16 に収まる (Wave38 で下限 1→2)', async () => {
     const bytes = await createSyntheticSutBrush({
       size: 30,
       useSpray: 1,

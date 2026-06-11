@@ -15,6 +15,17 @@ import { pickFile, downloadBlob } from './io/files';
 import type { ShapeKind } from './vector/shape';
 import { createMeshGrid } from './tools/mesh-warp';
 
+/**
+ * 度数を 0..360 の表示レンジへ正規化する(US-4103)。
+ * .sut 由来の tipAngle は負値や 2π 超を取りうるため、そのまま度数変換すると
+ * 基準回転スライダの表示と value が range の min/max を外れて UI が壊れる。
+ * 正規化は「表示・スライダ value」専用で、setBrush へ渡すラジアン変換は
+ * 入力値そのまま(従来どおり)とし、保存値の挙動は一切変えない。
+ */
+export function normalizeDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
 function guessMime(name: string): string {
   if (name.endsWith('.png')) return 'image/png';
   if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
@@ -499,8 +510,9 @@ export function App() {
                   方向追従
                 </label>
                 {/* tipAngle/tipAngleJitter はラジアン保持なので、UI 上は度数と相互変換する(US-4002)。 */}
-                <label>基準回転 <b>{Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI)}°</b>
-                  <input type="range" min={0} max={360} value={Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI)}
+                {/* .sut 由来で負値/2π超がありうるため、表示と value は normalizeDeg で 0..360 へ正規化(US-4103)。 */}
+                <label>基準回転 <b>{normalizeDeg(Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI))}°</b>
+                  <input type="range" min={0} max={360} value={normalizeDeg(Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI))}
                     onChange={(e) => s.setBrush({ tipAngle: (+e.target.value * Math.PI) / 180 })} />
                 </label>
                 <label>角度ジッタ <b>{Math.round(((s.brush.tipAngleJitter ?? 0) * 180) / Math.PI)}°</b>
