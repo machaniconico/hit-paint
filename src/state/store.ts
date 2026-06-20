@@ -743,7 +743,38 @@ function adjustmentLayerName(type: AdjustmentSpec['type']): string {
 }
 
 function cloneTextLayerData(data: TextLayerData): TextLayerData {
-  return { ...data, color: { ...data.color } };
+  return {
+    ...data,
+    color: { ...data.color },
+    // US-4604: pathPoints は VectorPath か PathPoint[] のいずれか。参照共有を避け deep clone。
+    pathPoints: data.pathPoints === undefined ? undefined : clonePathInput(data.pathPoints),
+  };
+}
+
+/** TextLayerData.pathPoints (VectorPath | PathPoint[]) を deep clone する。 */
+function clonePathInput(input: NonNullable<TextLayerData['pathPoints']>): NonNullable<TextLayerData['pathPoints']> {
+  if (Array.isArray(input)) return input.map((p) => ({ ...p }));
+  return { points: input.points.map((p) => ({ ...p })), closed: input.closed };
+}
+
+/**
+ * US-4604 純粋ヘルパ: 既存 TextLayerData にレイアウト系 patch(align/maxWidth/vertical/pathPoints)を
+ * 適用した新しい TextLayerData を返す(副作用なし・決定論)。
+ * - undefined の値は「クリア」として明示反映する(patch にキーが含まれていれば上書き)。
+ * - 互いに排他なモードでも値はそのまま保持し、描画優先順位は rasterizeTextLayer 側に委ねる。
+ */
+export function buildTextLayoutData(
+  base: TextLayerData,
+  patch: Pick<TextLayerData, 'align' | 'maxWidth' | 'vertical' | 'pathPoints'>,
+): TextLayerData {
+  const next = cloneTextLayerData(base);
+  if ('align' in patch) next.align = patch.align;
+  if ('maxWidth' in patch) next.maxWidth = patch.maxWidth;
+  if ('vertical' in patch) next.vertical = patch.vertical;
+  if ('pathPoints' in patch) {
+    next.pathPoints = patch.pathPoints === undefined ? undefined : clonePathInput(patch.pathPoints);
+  }
+  return next;
 }
 
 function cloneShapeData(data: ShapeData): ShapeData {
@@ -1012,6 +1043,11 @@ function textLayerDataEquals(a: TextLayerData, b: TextLayerData): boolean {
     && a.color.g === b.color.g
     && a.color.b === b.color.b
     && a.color.a === b.color.a
+    // US-4604 拡張フィールドの一致も判定(JSON 比較で pathPoints/align/maxWidth/vertical を含める)。
+    && a.align === b.align
+    && a.maxWidth === b.maxWidth
+    && a.vertical === b.vertical
+    && JSON.stringify(a.pathPoints ?? null) === JSON.stringify(b.pathPoints ?? null)
   );
 }
 
@@ -1247,6 +1283,10 @@ export interface AppState {
   placeTextAt: (x: number, y: number, text: string) => void;
   createTextLayerAt: (x: number, y: number, text: string) => void;
   updateActiveTextLayer: (patch: Partial<TextLayerData>) => void;
+  /** US-4604: アクティブテキストの整列/最大幅/縦書き/パス追従を設定し commitEdit する。 */
+  setActiveTextLayout: (
+    patch: Pick<TextLayerData, 'align' | 'maxWidth' | 'vertical' | 'pathPoints'>,
+  ) => void;
   addShapeLayer: (data?: Partial<ShapeData>) => void;
   addVectorLayer: (data?: Partial<VectorLayerData>) => void;
   updateActiveShapeLayer: (patch: Partial<ShapeData>) => void;
@@ -1980,6 +2020,24 @@ export const useStore = create<AppState>((set, get) => ({
     ));
     set({ doc: { ...doc, layers } });
     get().commitEdit('テキスト編集', layer.id, beforePixels, beforeTextData);
+  },
+  setActiveTextLayout: (patch) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || !layer.textData) return;
+
+    const beforePixels = layer.pixels.slice();
+    const beforeTextData = cloneTextLayerData(layer.textData);
+    // 純粋部分(TextLayerData 構築)を buildTextLayoutData に分離。
+    const textData = buildTextLayoutData(layer.textData, patch);
+    const pixels = rasterizeTextLayer(textData, doc.width, doc.height);
+    if (textLayerDataEquals(beforeTextData, textData) && pixelsEqual(beforePixels, pixels)) return;
+
+    const layers = doc.layers.map((item) => (
+      item.id === layer.id ? { ...item, textData, pixels } : item
+    ));
+    set({ doc: { ...doc, layers } });
+    get().commitEdit('テキストレイアウト', layer.id, beforePixels, beforeTextData);
   },
   addShapeLayer: (data) => {
     const { doc } = get();

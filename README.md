@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (1021 tests)
+npm test           # vitest (1067 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -142,6 +142,10 @@ start.cmd build    :: build / preview も同様
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、
   nearest/bilinear リサンプル(`tools/resample`)、繰り返しタイル塗りとシームレス化(`tools/pattern`)。
+- **テキストレイアウト強化** — 行折り返し+整列(`text/text-layout` の `layoutText`、maxWidth 語折り返し・left/center/right/justify 均等割付)、
+  テキストのパス追従(`text/text-on-path` の `layoutTextOnPath`、弧長配置+接線角度、`vector/path-measure` 連携)、
+  縦書き(`text/text-vertical` の `layoutVerticalText`、上→下・列右→左)。`TextLayerData` に `align`/`maxWidth`/`vertical`/`pathPoints` を追加し
+  `rasterizeTextLayer` が分岐描画(`renderPositionedGlyphs`)、UI 配線。拡張未指定は従来描画とバイト同一。
 - **ペンツール / 液状化 / トーン** — ベジェのペンツール(`tools`+`vector/path`、塗り/線で確定・選択尊重・Undo)、
   液状化ワープ(`tools/liquify` の push/bloat/pinch)、ヒストグラム等化とガンマ補正(`filters/tone`)。
 - **ビューポート** — パン(Shift/中ボタン/手のひら) / ホイールズーム / 回転対応の変換行列。

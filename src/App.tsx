@@ -749,6 +749,45 @@ export function App() {
                   onChange={(e) => s.updateActiveTextLayer({ color: hexToRgba(e.target.value) })}
                 />
               </label>
+              <label>整列
+                <select
+                  value={activeTextData.align ?? 'left'}
+                  onChange={(e) =>
+                    s.setActiveTextLayout({ align: e.target.value as 'left' | 'center' | 'right' | 'justify' })
+                  }
+                >
+                  <option value="left">左</option>
+                  <option value="center">中央</option>
+                  <option value="right">右</option>
+                  <option value="justify">均等</option>
+                </select>
+              </label>
+              <label>最大幅
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder="無制限"
+                  value={activeTextData.maxWidth ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '') {
+                      s.setActiveTextLayout({ maxWidth: undefined });
+                      return;
+                    }
+                    const n = Number(v);
+                    if (Number.isFinite(n)) s.setActiveTextLayout({ maxWidth: Math.max(0, Math.trunc(n)) });
+                  }}
+                />
+              </label>
+              <label className="text-edit-toggle">
+                <input
+                  type="checkbox"
+                  checked={activeTextData.vertical === true}
+                  onChange={(e) => s.setActiveTextLayout({ vertical: e.target.checked })}
+                />
+                縦書き
+              </label>
             </section>
           )}
 
