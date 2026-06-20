@@ -1056,6 +1056,27 @@ export function App() {
               >
                 削除
               </button>
+              <button
+                className="mini"
+                title="現在フレームと次フレームの間に中割り3枚を挿入"
+                disabled={s.timeline.currentIndex >= s.timeline.frames.length - 1}
+                onClick={() => s.insertTweenFrames(s.timeline.currentIndex, 3)}
+              >
+                中割り
+              </button>
+              <button className="mini" onClick={s.exportGif}>GIF書き出し</button>
+            </div>
+            <div className="anim-playback" role="group" aria-label="再生モード">
+              {(['once', 'loop', 'pingpong'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  className="mini"
+                  aria-pressed={s.playbackMode === mode}
+                  onClick={() => s.setPlaybackMode(mode)}
+                >
+                  {mode === 'once' ? '1回' : mode === 'loop' ? 'ループ' : '往復'}
+                </button>
+              ))}
             </div>
             <label className="check anim-toggle">
               <input

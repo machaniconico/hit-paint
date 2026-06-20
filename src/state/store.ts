@@ -1,5 +1,16 @@
 import { create } from 'zustand';
-import { createTimeline, removeFrame as removeTimelineFrame, type Frame, type Timeline } from '../anim/timeline';
+import {
+  createTimeline,
+  insertFrame as insertTimelineFrame,
+  removeFrame as removeTimelineFrame,
+  type Frame,
+  type Timeline,
+} from '../anim/timeline';
+import { tweenFrames, type EasingLike } from '../anim/tween';
+import { encodeGif, type GifFrameInput } from '../io/gif';
+import { type PlaybackMode } from '../anim/playback';
+import { flattenRGBA } from '../io/png';
+import { downloadBlob } from '../io/files';
 import type {
   AdjustmentSpec, BrushSettings, Layer, LayerId, PaintDocument, PointerSample, RGBA, ToolId, Viewport,
 } from '../types';
@@ -629,6 +640,66 @@ function cloneFrame(frame: Frame): Frame {
   };
 }
 
+/**
+ * Wave40 US-4204 — 中割り(tween)挿入の純粋ヘルパ。
+ *
+ * timeline の index 番フレームと次フレーム(index+1)の間に、tweenFrames で
+ * count 枚の中割りフレームを生成して insertFrame で差し込んだ **新しい Timeline** を返す。
+ * 副作用なし(元 timeline は不変)・決定論的(id は 'tween_<insertBase>_<n>' で命名)。
+ *
+ * - index が最終フレーム以降 / フレームが1枚以下 / count<=0 の場合は補間できないので
+ *   元 timeline をそのまま(コピーで)返す。
+ * - 中割りは insertFrame を index+1 から順に差し込む(挿入順を保つため後ろから入れる)。
+ */
+export function buildTweenInsertion(
+  timeline: Timeline,
+  index: number,
+  count: number,
+  easing?: EasingLike,
+): Timeline {
+  const frames = timeline.frames;
+  const n = Math.max(0, Math.trunc(count));
+  if (n <= 0 || frames.length < 2) {
+    return { ...timeline, frames: [...frames] };
+  }
+  const from = clampTimelineIndex(timeline, index);
+  if (from >= frames.length - 1) {
+    return { ...timeline, frames: [...frames] };
+  }
+
+  const tweens = tweenFrames(frames[from], frames[from + 1], n, easing);
+  // 決定論的に再 id 化(複数回挿入しても衝突しないよう挿入位置を含める)。
+  const ided = tweens.map((frame, i) => ({
+    ...frame,
+    id: `tween_${from}_${i + 1}`,
+  }));
+
+  let next = timeline;
+  // 後ろから差し込むと前段の挿入で index がずれない。
+  for (let i = ided.length - 1; i >= 0; i -= 1) {
+    next = insertTimelineFrame(next, from + 1, ided[i]);
+  }
+  return next;
+}
+
+/**
+ * Wave40 US-4204 — GIF フレーム配列組み立ての純粋ヘルパ。
+ *
+ * timeline.frames から encodeGif 用の { rgba, delayMs } 配列を作る。
+ * RGBA 化は副作用を持つ flatten コールバックに委譲する(ImageData を使う本番経路は
+ * jsdom で動かないため、テストではダミーの flatten を注入して検証できる)。
+ * delayMs は各フレームの durationMs をそのまま採用する。
+ */
+export function buildGifFrameInputs(
+  frames: Frame[],
+  flatten: (frame: Frame) => Uint8ClampedArray,
+): GifFrameInput[] {
+  return frames.map((frame) => ({
+    rgba: flatten(frame),
+    delayMs: frame.durationMs,
+  }));
+}
+
 function validActiveLayerId(layers: Layer[], preferred: LayerId | null): LayerId | null {
   if (preferred && layers.some((layer) => layer.id === preferred)) return preferred;
   return layers[layers.length - 1]?.id ?? null;
@@ -766,6 +837,8 @@ export interface AppState {
   canRedo: boolean;
   maskEditMode: boolean;
   penPath: VectorPath | null;
+  /** アニメ再生モード(once/loop/pingpong)。US-4204。 */
+  playbackMode: PlaybackMode;
 
   // document lifecycle
   newDocument: (w?: number, h?: number, name?: string) => void;
@@ -777,6 +850,12 @@ export interface AppState {
   addAnimFrame: () => void;
   gotoAnimFrame: (index: number) => void;
   removeAnimFrame: (index: number) => void;
+  /** index 番フレームと次フレームの間に count 枚の中割りを挿入する(US-4204)。 */
+  insertTweenFrames: (index: number, count: number, easing?: EasingLike) => void;
+  /** 全フレームを RGBA 化しアニメ GIF を生成・ダウンロードする(US-4204, ブラウザ専用)。 */
+  exportGif: () => void;
+  /** アニメ再生モードを設定する(US-4204)。 */
+  setPlaybackMode: (mode: PlaybackMode) => void;
   setOnionSkin: (on: boolean) => void;
 
   // tool & brush & color
@@ -916,6 +995,7 @@ export const useStore = create<AppState>((set, get) => ({
   canRedo: false,
   maskEditMode: false,
   penPath: null,
+  playbackMode: 'loop',
 
   newDocument: (w = 1280, h = 720, name = '無題') => {
     history.clear();
@@ -1014,6 +1094,26 @@ export const useStore = create<AppState>((set, get) => ({
       rev: get().rev + 1,
     });
   },
+  insertTweenFrames: (index, count, easing) => {
+    const { doc, timeline } = get();
+    const savedTimeline = snapshotCurrentTimelineFrame(timeline, doc);
+    set({ timeline: buildTweenInsertion(savedTimeline, index, count, easing) });
+  },
+  exportGif: () => {
+    const { doc, timeline } = get();
+    const savedTimeline = snapshotCurrentTimelineFrame(timeline, doc);
+    const { width, height } = doc;
+    // 各フレームの layers を doc の寸法で合成して RGBA 化する(flattenRGBA は
+    // ImageData を使うブラウザ専用経路なのでテストでは呼ばれない)。
+    const flatten = (frame: Frame): Uint8ClampedArray =>
+      flattenRGBA({ ...doc, layers: frame.layers }).data;
+    const frames = buildGifFrameInputs(savedTimeline.frames, flatten);
+    const bytes = encodeGif({ width, height, frames, loop: 0 });
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    downloadBlob(new Blob([buffer], { type: 'image/gif' }), `${doc.name}.gif`);
+  },
+  setPlaybackMode: (mode) => set({ playbackMode: mode }),
   setOnionSkin: (on) => set({ onionSkinEnabled: on }),
 
   setTool: (t) => set({ tool: t }),

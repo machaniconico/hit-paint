@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (787 tests)
+npm test           # vitest (846 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -71,6 +71,11 @@ start.cmd build    :: build / preview も同様
 - **アニメーション** — コマ撮りフレームのタイムライン管理(`anim/timeline` の追加/複製/並べ替え)と
   オニオンスキン合成(前後フレームを低不透明度で重ねる)。store/UI 配線済み(フレーム追加・移動・
   削除・オニオン切替、フレーム間で画素バッファ非共有)。
+- **アニメーション書き出し&補間** — キーフレーム中割り(`anim/tween` の13種イージング linear/quad/cubic/sine/back
+  と `tweenFrames` で2フレーム間の opacity 等を補間生成)、アニメ GIF 書き出し(`io/gif` の `encodeGif`
+  = グローバルパレット量子化 + 可変長 LZW + NETSCAPE2.0 ループ拡張、自前 `decodeGifLzw` でラウンドトリップ検証)、
+  再生タイミング(`anim/playback` の `frameTimings`/`resolveFrameAt`、1回/ループ/往復(pingpong)モード)。
+  store/UI に中割り・GIF 書き出し・再生モード切替を配線(既存タイムライン挙動は不変)。
 - **色変換 / モーションブラー** — RGB↔HSL 変換と色温度・色合い調整(`color/convert`)、
   方向性モーションブラーと放射(ズーム)ブラー(`filters/motion-blur`)。
 - **アンシャープ / 色置換** — 輪郭強調のアンシャープマスク(`filters/unsharp`、threshold付き)、
