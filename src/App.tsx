@@ -124,6 +124,18 @@ function screenToDoc(
   return { x: rx / vp.zoom, y: ry / vp.zoom };
 }
 
+/**
+ * 角度(度)を 0..360 の範囲へ正規化する純粋関数(US-4103)。
+ * .sut 由来の brush.tipAngle はラジアン保持で、負値や 2π 超の値を取りうる。
+ * 度数変換すると -90° や 370° のようにスライダ(min=0,max=360)の範囲外になり、
+ * 表示と value がクランプされて実値とズレる。これを防ぐため表示・value 専用に正規化する。
+ * 写像例: -90 → 270, 370 → 10, -360 → 0, 720 → 0。負の剰余を避けるため二重剰余で畳む。
+ * 注意: setBrush へ渡すラジアン変換には適用しない(入力値そのままで従来挙動を維持)。
+ */
+export function normalizeDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
 export function App() {
   const s = useStore();
   const [penStrokeWidth, setPenStrokeWidth] = useState(2);
@@ -499,12 +511,14 @@ export function App() {
                   方向追従
                 </label>
                 {/* tipAngle/tipAngleJitter はラジアン保持なので、UI 上は度数と相互変換する(US-4002)。 */}
-                <label>基準回転 <b>{Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI)}°</b>
-                  <input type="range" min={0} max={360} value={Math.round(((s.brush.tipAngle ?? 0) * 180) / Math.PI)}
+                {/* .sut 由来で tipAngle が負/2π超でも表示・value は 0..360 へ正規化する(US-4103)。setBrush へ渡す値は入力そのまま。 */}
+                <label>基準回転 <b>{Math.round(normalizeDeg(((s.brush.tipAngle ?? 0) * 180) / Math.PI))}°</b>
+                  <input type="range" min={0} max={360} value={Math.round(normalizeDeg(((s.brush.tipAngle ?? 0) * 180) / Math.PI))}
                     onChange={(e) => s.setBrush({ tipAngle: (+e.target.value * Math.PI) / 180 })} />
                 </label>
-                <label>角度ジッタ <b>{Math.round(((s.brush.tipAngleJitter ?? 0) * 180) / Math.PI)}°</b>
-                  <input type="range" min={0} max={180} value={Math.round(((s.brush.tipAngleJitter ?? 0) * 180) / Math.PI)}
+                {/* 角度ジッタは仕様上 0..180 だが、防御的に下限 0・上限 180 へクランプ(表示のみ)。 */}
+                <label>角度ジッタ <b>{Math.round(Math.max(0, Math.min(180, ((s.brush.tipAngleJitter ?? 0) * 180) / Math.PI)))}°</b>
+                  <input type="range" min={0} max={180} value={Math.round(Math.max(0, Math.min(180, ((s.brush.tipAngleJitter ?? 0) * 180) / Math.PI)))}
                     onChange={(e) => s.setBrush({ tipAngleJitter: (+e.target.value * Math.PI) / 180 })} />
                 </label>
                 <label>散布半径 <b>{Math.round(s.brush.tipScatter ?? 0)}px</b>

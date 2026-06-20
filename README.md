@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (760 tests)
+npm test           # vitest (787 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -118,6 +118,9 @@ start.cmd build    :: build / preview も同様
   spray ON の `.sut` で散布が必ず効く density 写像(下限2)と基準回転/角度ジッタの UI スライダ、
   筆圧 Effector の厳密スコープ抽出(`io/sut-pressure` の `findEffectorCurves`/`selectBrushPressureCurves`、前段 u32 レイアウト実ファイル検証済み・偽陽性を構造的に除外)、
   対称描画での tip 回転鏡映(`engine/symmetry` の `mirrorPointsWithMeta`、flip/rotate メタで各ミラー点の実回転を導出)。
+- **tip ブラシ忠実度の最終仕上げ** — Effector カーブの (x,y) ペア正規化・等間隔再サンプル(`io/sut-pressure` の `resampleEffectorCurve`、非一様 x 配置のカーブ形状を正確化、`selectBrushPressureCurves({normalize})` で opt-in・既定はバイト同一)、
+  キラル(非対称)tip の真の鏡映(`engine/tip-stamp`/`engine/tip-scatter` の `flipX`、tip 空間横反転を回転前に合成・未指定はバイト同一)を store の対称描画へ配線(`flip→flipX` + pointRotation 幾何補正で回転済みスタンプの真の鏡像)、
+  基準回転スライダの負値/360超正規化(`App` の `normalizeDeg`、表示のみ・setBrush ラジアンは不変)。
 - **レイヤー効果(拡張)** — ドロップシャドウ/縁取り/光彩に加え、インナーシャドウと
   ベベル・エンボス(`core/layer-effects` の `innerShadow`/`bevelEmboss`、純粋関数・ソース内部限定)。
 - **減色 / リサンプル / パターン** — メディアンカット減色(`filters/quantize`、フィルターメニュー配線済み)、

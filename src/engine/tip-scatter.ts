@@ -79,6 +79,12 @@ export interface ScatteredTipOptions {
   size: number;
   /** tip の回転(ラジアン, 既定0)。散布スタンプ全てに同じ回転を適用。 */
   rotation?: number;
+  /**
+   * tip の横方向反転(既定 false)。散布スタンプ全てに同じ flipX を適用する。
+   * 散布オフセット自体は反転しない(オフセットパターンの対称性は store 側の
+   * 設計判断)。stampTip の flipX へそのまま渡すだけ。
+   */
+  flipX?: boolean;
   /** 不透明度係数(0..1, 既定1)。 */
   flow?: number;
   /** 散布半径(px, 既定0)。0 以下なら散布しない。 */
@@ -109,6 +115,7 @@ export function stampScatteredTip(
 ): void {
   const { x, y, size } = opts;
   const rotation = opts.rotation ?? 0;
+  const flipX = opts.flipX ?? false;
   const flow = opts.flow ?? 1;
   const scatter = opts.scatter ?? 0;
   const density = opts.density ?? 1;
@@ -117,7 +124,7 @@ export function stampScatteredTip(
 
   // 散布条件を満たさなければ従来同等の単発スタンプ。
   if (scatter <= 0 || density <= 1) {
-    stampTip(coverage, cw, ch, tip, { x, y, size, rotation, flow });
+    stampTip(coverage, cw, ch, tip, { x, y, size, rotation, flipX, flow });
     return;
   }
 
@@ -126,6 +133,6 @@ export function stampScatteredTip(
   const offsets = scatterOffsets(stepSeed, density, scatter);
 
   for (const { dx, dy } of offsets) {
-    stampTip(coverage, cw, ch, tip, { x: x + dx, y: y + dy, size, rotation, flow });
+    stampTip(coverage, cw, ch, tip, { x: x + dx, y: y + dy, size, rotation, flipX, flow });
   }
 }

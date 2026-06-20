@@ -364,8 +364,26 @@ class StoreStrokeEngine {
         ? [{ x: dab.x, y: dab.y, flip: false, rotate: 0 }]
         : mirrorPointsWithMeta(dab.x, dab.y, this.symmetry);
       for (const point of metaPoints) {
-        // 鏡映(flip)なら角度は rotate - θ、回転コピーなら rotate + θ に写る。
-        const pointRotation = point.flip ? point.rotate - rotation : point.rotate + rotation;
+        // 鏡映コピー(flip)は tip 空間でも横方向反転(flipX)し、回転済みスタンプ
+        // 全体の「真の鏡像」を作る(US-4104)。
+        //
+        // 幾何(tip-stamp.ts の逆変換で実証): キャンバスの縦軸鏡映は
+        //   mirror_x( stamp(rotation=φ) ) == stamp(rotation=-φ, flipX=true)
+        // が厳密に成立する(角度を符号反転し、形状も横反転する)。両軸対称 tip では
+        // flipX が恒等になるため Wave38 では「角度のみ鏡映」で足りていたが、キラル
+        // (非対称)tip では形状反転が必須。
+        //
+        // mirrorPointsWithMeta の rotate は反転線の向きを表す(horizontal=π,
+        // vertical=0)。これを flipX(=横反転)基準の角度へ写すと、flip コピーの
+        // 実回転は (π - rotate) - θ になる:
+        //   - horizontal(rotate=π): (π-π)-θ = -θ → 縦軸鏡映(flipX, 角度 -θ)。
+        //   - vertical  (rotate=0): (π-0)-θ = π-θ → 横軸鏡映(flipX を 180° 回して
+        //     縦反転に転化, 角度 π-θ)。
+        // 非 flip コピー(both の 180° 回転 / radial / none)は従来どおり
+        // rotate + θ・flipX 無しで完全一致(mode='none' はバイト不変)。
+        const pointRotation = point.flip
+          ? Math.PI - point.rotate - rotation
+          : point.rotate + rotation;
         if (scatter > 0 && density > 1) {
           // 散布スタンプ(決定論: seed+dabStep で打点ごとに散布が変わる)。
           // 散布 seed はミラー点 index で変えない: 全鏡映コピーで同一の散布
@@ -375,6 +393,7 @@ class StoreStrokeEngine {
             y: point.y,
             size: tipSize,
             rotation: pointRotation,
+            flipX: point.flip,
             flow: tipFlow,
             scatter,
             density,
@@ -387,6 +406,7 @@ class StoreStrokeEngine {
             y: point.y,
             size: tipSize,
             rotation: pointRotation,
+            flipX: point.flip,
             flow: tipFlow,
           });
         }
@@ -1019,9 +1039,13 @@ export const useStore = create<AppState>((set, get) => ({
 
     // 筆圧カーブを抽出。選択ロジック(厳密 Effector 抽出 + 従来署名走査への
     // フォールバック、偽陽性/恒等カーブのガード)は selectBrushPressureCurves に
-    // 集約されている(US-4003/US-4004)。実ファイルでの結果は従来フィルタと不変。
+    // 集約されている(US-4003/US-4004)。
+    // normalize:true で、厳密 Effector 経路は (x,y) ペアを等間隔再サンプルした
+    // 正規化カーブを返す(US-4101/US-4104)。x が非一様なカーブで形状を歪めない。
+    // フォールバック経路(findPressureCurves)は normalize に依らず挙動不変なので、
+    // Effector を持たない従来 .sut(=実サンプルの大半)ではバイト同一を維持する。
     try {
-      const curves = selectBrushPressureCurves(bytes);
+      const curves = selectBrushPressureCurves(bytes, { normalize: true });
       if (curves.length >= 2) {
         settings.pressureSizeCurve = curves[0];
         settings.pressureFlowCurve = curves[1];

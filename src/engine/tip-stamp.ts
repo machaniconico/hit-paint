@@ -110,17 +110,27 @@ function sampleTip(tip: TipAlpha, sx: number, sy: number): number {
  * - 出力画素中心を逆回転・逆スケールで tip 座標へ写し、bilinear サンプル。
  * - キャンバス境界でクリップ。範囲外書き込み/throw は一切しない。
  * - size<=0 や flow<=0 は no-op。
+ *
+ * flipX(既定 false): tip 空間の横方向(縦軸まわり)反転。**合成順序は
+ * 順変換 = rotate(rotation) ∘ flipX ∘ scale**。つまり flipX は scale の後・
+ * rotation の前に適用される(tip 空間内で先に左右反転してから回転させる)。
+ * これによりキラル(非対称)な tip でも真の鏡像が得られる。実装は逆変換
+ * サンプル側なので、逆回転後の rx を符号反転して tip 座標へ写すだけで済む
+ * (sx = (-rx)*invScale + tipCx - 0.5、ry/sy は不変)。
+ * symmetry の mirrorPointsWithMeta(変換後角度 = rotate - θ)と組で使うと、
+ * 回転済みスタンプ全体の真の鏡像(回転 -θ + flipX)になる。
  */
 export function stampTip(
   coverage: Float32Array,
   cw: number,
   ch: number,
   tip: TipAlpha,
-  opts: { x: number; y: number; size: number; rotation?: number; flow?: number },
+  opts: { x: number; y: number; size: number; rotation?: number; flow?: number; flipX?: boolean },
 ): void {
   const { x, y, size } = opts;
   const rotation = opts.rotation ?? 0;
   const flow = opts.flow ?? 1;
+  const flipX = opts.flipX ?? false;
 
   if (size <= 0 || flow <= 0) return;
   if (tip.width <= 0 || tip.height <= 0) return;
@@ -162,7 +172,10 @@ export function stampTip(
       const ry = -dx * sin + dy * cos;
 
       // 逆スケールして tip 中心へ。tip画素中心が整数+0.5 になるよう -0.5。
-      const sx = rx * invScale + tipCx - 0.5;
+      // flipX 時は順変換 flipX が rotate の前(scale の後)に入るので、
+      // 逆変換では逆回転で得た rx の符号を反転してから tip 座標へ写す
+      // (ry は flipX の影響を受けない)。
+      const sx = (flipX ? -rx : rx) * invScale + tipCx - 0.5;
       const sy = ry * invScale + tipCy - 0.5;
 
       const a = sampleTip(tip, sx, sy);
