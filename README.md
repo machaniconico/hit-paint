@@ -14,6 +14,20 @@ npm test           # vitest (760 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
+### ワンクリック起動ショートカット
+
+依存導入〜開発サーバ起動〜ブラウザ表示までを一発で行うショートカットを同梱しています。
+
+```bash
+./start.sh         # WSL / Linux / macOS : npm install (初回のみ) -> dev サーバ -> ブラウザを開く
+./start.sh build   # 本番ビルド  /  ./start.sh preview でプレビュー
+```
+
+```bat
+start.cmd          :: Windows : 同上 (ダブルクリックでも起動可)
+start.cmd build    :: build / preview も同様
+```
+
 ## 機能
 
 - **描画エンジン** — スタンプ補間ブラシ。筆圧→サイズ/不透明度（Pointer Events）、傾き取得、
