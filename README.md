@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (846 tests)
+npm test           # vitest (901 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -50,6 +50,10 @@ start.cmd build    :: build / preview も同様
 - **色調整・ヒストグラム** — `filters/curves`(制御点→256段LUT) / `filters/color-balance`
   (シャドウ/中間/ハイライト別RGBシフト + グラデーションマップ) / `filters/histogram`
   (度数集計・オートレベル・オートコントラスト、アルファ0除外・外れ値クリップ)。
+- **3D LUT カラーグレーディング** — 3次元LUTモデルとトライリニア補間適用(`color/lut` の `Lut3D`/`sampleLutTrilinear`/`applyLut`、
+  格子点厳密一致・α不変)、Adobe/IRIDAS `.cube` の読み書き(`io/cube` の `parseCubeLut`/`writeCubeLut`、
+  LUT_3D_SIZE/DOMAIN_MIN/MAX 対応・ラウンドトリップ)、組み込みプリセット手続き生成(`color/lut-presets` の
+  warm/cool/sepia/contrastS(S字トーン)/monochrome)。store/UI に `.cube`取込・プリセット選択・LUT適用(Undo対応)・`.cube`書き出しを配線。
 - **レイヤーマスク手描き** — 円形ブラシ(`tools/mask-paint` の `paintMaskDab`/`paintMaskStroke`、
   hardnessでエッジ硬さ、shape(round/soft の smoothstep)・flow を反映)でマスクを直接ペイント。
   UI の「マスク編集」トグル ON でブラシ描画がアクティブレイヤーのマスクに作用する(OFF 時は通常描画)。

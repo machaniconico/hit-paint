@@ -12,6 +12,7 @@ import { importPSD, exportPSD } from './io/psd';
 import { importCLIP, exportCLIP } from './io/clip';
 import { exportPNG, importImageFile } from './io/png';
 import { pickFile, downloadBlob } from './io/files';
+import { LUT_PRESET_NAMES, type LutPresetName } from './color/lut-presets';
 import type { ShapeKind } from './vector/shape';
 import { createMeshGrid } from './tools/mesh-warp';
 
@@ -146,6 +147,7 @@ export function App() {
   const [zoomBlurStrength, setZoomBlurStrength] = useState(0.35);
   const [mosaicBlockSize, setMosaicBlockSize] = useState(4);
   const [quantizeMaxColors, setQuantizeMaxColors] = useState(16);
+  const [lutPreset, setLutPreset] = useState<LutPresetName>(LUT_PRESET_NAMES[0]);
   const [canvasW, setCanvasW] = useState(s.doc.width);
   const [canvasH, setCanvasH] = useState(s.doc.height);
   const [resizeFromCenter, setResizeFromCenter] = useState(false);
@@ -215,6 +217,18 @@ export function App() {
     } catch (err) {
       // eslint-disable-next-line no-alert
       alert('読み込みに失敗しました: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const importLutFile = async () => {
+    try {
+      const picked = await pickFile('.cube');
+      if (!picked) return;
+      const text = new TextDecoder().decode(picked.buffer);
+      s.importCubeLut(text);
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert('LUT 読み込みに失敗しました: ' + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -833,6 +847,42 @@ export function App() {
                   s.applyCloneStamp(point.x + 48, point.y, 20);
                 }}>
                 クローン実行(デモ)
+              </button>
+            </div>
+          </section>
+
+          <section className="panel color-grading">
+            <h3>カラーグレーディング (LUT)</h3>
+            <div className="filter-control-row">
+              <label>プリセット
+                <select
+                  value={lutPreset}
+                  onChange={(e) => setLutPreset(e.target.value as LutPresetName)}
+                >
+                  {LUT_PRESET_NAMES.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </label>
+              <button className="mini" onClick={() => s.setLutPreset(lutPreset)}>
+                プリセット適用準備
+              </button>
+            </div>
+            <div className="filter-grid">
+              <button className="mini" onClick={importLutFile}>.cube 読込</button>
+              <button
+                className="mini"
+                disabled={!canFilterActive || !s.currentLut}
+                onClick={() => s.applyLut()}
+              >
+                LUT 適用
+              </button>
+              <button
+                className="mini"
+                disabled={!s.currentLut}
+                onClick={() => s.exportCubeLut(s.doc.name)}
+              >
+                .cube 書き出し
               </button>
             </div>
           </section>

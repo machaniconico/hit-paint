@@ -11,6 +11,9 @@ import { encodeGif, type GifFrameInput } from '../io/gif';
 import { type PlaybackMode } from '../anim/playback';
 import { flattenRGBA } from '../io/png';
 import { downloadBlob } from '../io/files';
+import { applyLut as applyLutToPixels, type Lut3D } from '../color/lut';
+import { parseCubeLut, writeCubeLut } from '../io/cube';
+import { LUT_PRESETS, type LutPresetName } from '../color/lut-presets';
 import type {
   AdjustmentSpec, BrushSettings, Layer, LayerId, PaintDocument, PointerSample, RGBA, ToolId, Viewport,
 } from '../types';
@@ -812,6 +815,47 @@ function compositeMaskWithColor(
   }
 }
 
+// ---------------------------------------------------------------------------
+// カラーグレーディング (3D LUT) の純粋ヘルパ (US-4304)。
+//
+// store アクションの「核」をブラウザ API (downloadBlob/pickFile) から切り離し、
+// 副作用なしの純粋関数として公開する。jsdom では canvas API が使えないため、
+// これらを直接テストして配線(委譲)の正しさを検証する。
+// ---------------------------------------------------------------------------
+
+/**
+ * プリセット名から LUT を解決する純粋ヘルパ。
+ * 未知の名前は null を返す(setLutPreset は null を無視する)。
+ */
+export function resolveLutPreset(name: string, size?: number): Lut3D | null {
+  const factory = LUT_PRESETS[name as LutPresetName];
+  if (!factory) return null;
+  return factory(size);
+}
+
+/** .cube テキストを Lut3D へ変換する純粋ヘルパ(parseCubeLut への委譲)。 */
+export function lutFromCubeText(text: string): Lut3D {
+  return parseCubeLut(text);
+}
+
+/** Lut3D を .cube テキストへ変換する純粋ヘルパ(writeCubeLut への委譲)。 */
+export function lutToCubeText(lut: Lut3D, title?: string): string {
+  return writeCubeLut(lut, title);
+}
+
+/**
+ * 画素バッファへ LUT を破壊的適用する純粋ヘルパ(color/lut.ts applyLut への委譲)。
+ * store の applyLut アクションと完全に同じ画素変換を行うことを保証する。
+ */
+export function applyLutToBuffer(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  lut: Lut3D,
+): void {
+  applyLutToPixels(pixels, width, height, lut);
+}
+
 export interface AppState {
   doc: PaintDocument;
   timeline: Timeline;
@@ -839,6 +883,8 @@ export interface AppState {
   penPath: VectorPath | null;
   /** アニメ再生モード(once/loop/pingpong)。US-4204。 */
   playbackMode: PlaybackMode;
+  /** 現在のカラーグレーディング用 3D LUT(未選択なら null)。US-4304。 */
+  currentLut: Lut3D | null;
 
   // document lifecycle
   newDocument: (w?: number, h?: number, name?: string) => void;
@@ -956,6 +1002,16 @@ export interface AppState {
   applyKaleidoscope: (opts?: Partial<KaleidoscopeOptions>) => void;
   applyLayerEffect: <T extends LayerEffectKind>(kind: T, opts?: LayerEffectOptionMap[T]) => void;
 
+  // color grading (3D LUT) — US-4304
+  /** 組み込みプリセット名から currentLut を設定する。未知名は無視。 */
+  setLutPreset: (name: string, size?: number) => void;
+  /** .cube テキストを取り込んで currentLut を設定する(失敗時は例外)。 */
+  importCubeLut: (text: string) => void;
+  /** currentLut をアクティブ raster レイヤー画素へ破壊的適用し Undo 履歴へ積む。 */
+  applyLut: () => void;
+  /** currentLut を .cube テキスト化し downloadBlob でダウンロードする。 */
+  exportCubeLut: (title?: string) => void;
+
   // history
   undo: () => void;
   redo: () => void;
@@ -996,6 +1052,7 @@ export const useStore = create<AppState>((set, get) => ({
   maskEditMode: false,
   penPath: null,
   playbackMode: 'loop',
+  currentLut: null,
 
   newDocument: (w = 1280, h = 720, name = '無題') => {
     history.clear();
@@ -2392,6 +2449,38 @@ export const useStore = create<AppState>((set, get) => ({
       get().commitEdit('フィルター', layer.id, before);
     }
   },
+
+  // --- color grading (3D LUT) — US-4304 -----------------------------------
+  setLutPreset: (name, size) => {
+    const lut = resolveLutPreset(name, size);
+    if (!lut) return; // 未知のプリセット名は無視
+    set({ currentLut: lut });
+  },
+  importCubeLut: (text) => {
+    // parse 失敗は例外として呼び出し側(UI)へ伝播させる。
+    const lut = lutFromCubeText(text);
+    set({ currentLut: lut });
+  },
+  applyLut: () => {
+    const { doc, currentLut } = get();
+    if (!currentLut) return;
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || layer.kind !== 'raster' || layer.locked) return;
+
+    const before = layer.pixels.slice();
+    applyLutToBuffer(layer.pixels, doc.width, doc.height, currentLut);
+
+    if (!pixelsEqual(before, layer.pixels)) {
+      get().commitEdit('LUT適用', layer.id, before);
+    }
+  },
+  exportCubeLut: (title) => {
+    const { currentLut } = get();
+    if (!currentLut) return;
+    const text = lutToCubeText(currentLut, title);
+    downloadBlob(new Blob([text], { type: 'text/plain' }), `${title ?? 'hit-paint'}.cube`);
+  },
+
   fillWithGradient: (spec) => {
     const { doc } = get();
     const layer = activeLayer(doc);
