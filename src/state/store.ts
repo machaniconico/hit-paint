@@ -49,7 +49,17 @@ import {
   rasterizeVectorLayer,
   updateVectorLayerData,
   type VectorLayerData,
+  type VectorSubpath,
 } from '../vector/vector-layer';
+import { pointsAlong } from '../vector/path-measure';
+import { strokeToOutline, type StrokeOutlineOptions as StrokeContourOptions } from '../vector/stroke-outline';
+import {
+  applyMatrixToPath,
+  rotatePath,
+  skewPath,
+  mirrorPath,
+  type Mat2x3,
+} from '../vector/path-transform';
 import {
   adjustBrightnessContrast,
   adjustHueSaturation,
@@ -108,7 +118,7 @@ import {
   removeSwatch,
   type HarmonyScheme,
 } from '../color/palette';
-import { rasterizeFill, rasterizeStroke, type VectorPath } from '../vector/path';
+import { flattenPath, rasterizeFill, rasterizeStroke, type PathPoint, type VectorPath } from '../vector/path';
 import {
   bevelEmboss,
   dropShadow,
@@ -753,6 +763,118 @@ function cloneVectorLayerData(data: VectorLayerData): VectorLayerData {
   return createVectorLayerData(data);
 }
 
+// ---------------------------------------------------------------------------
+// Wave43 US-4504 — ベクター配線の純粋ヘルパ(副作用無し・決定論)
+//
+// 設計判断:
+// - 等間隔配置/アウトライン化/パス変換の核ロジックを store のアクションから切り出し、
+//   副作用(set/commitEdit)を持たない純粋関数として export する。jsdom では canvas API が
+//   使えないため、これら純粋ヘルパだけを配列ロジックで検証できるようにする。
+// - 各ヘルパは US-4501(path-measure)/US-4502(stroke-outline)/US-4503(path-transform)へ
+//   薄く委譲し、戻り値が単体 export と完全一致することをテストで担保する。
+// - Date.now()/Math.random() は一切使わない。
+// ---------------------------------------------------------------------------
+
+/** パスに沿って spacing 間隔の点列(各 angle 付き)を返す。US-4501 pointsAlong へ委譲。 */
+export function pointsAlongPath(
+  path: VectorPath,
+  spacing: number,
+  offset = 0,
+): { x: number; y: number; angle: number }[] {
+  return pointsAlong(path, spacing, offset);
+}
+
+/**
+ * ベクターパスをアウトライン化し、塗り可能な閉 VectorPath を返す。
+ * パスを flattenPath で折れ線化 → US-4502 strokeToOutline で外周リング点列を得て、
+ * それを直線アンカーのみの closed=true な VectorPath に詰め直す(制御点なし)。
+ * リングが 3 点未満(退化)なら null。
+ */
+export function strokeToOutlinePath(
+  path: VectorPath,
+  opts: StrokeContourOptions,
+  steps?: number,
+): VectorPath | null {
+  const polyline = flattenPath(path, steps);
+  const ring = strokeToOutline(polyline, opts);
+  if (ring.length < 3) return null;
+  const points: PathPoint[] = ring.map((p) => ({ x: p.x, y: p.y }));
+  return { points, closed: true };
+}
+
+/**
+ * 選択 subpath(既定は全 subpath)をアウトライン化した新しい VectorLayerData を返す。
+ * 各 subpath の stroke.width をアウトライン太さに採用(無ければ既定 1)。
+ * アウトラインは塗り(元 stroke 色 or 元 fill 色)付き subpath として追加する。
+ * 元データは不変。退化 subpath はスキップ(元のまま保持)。
+ */
+export function outlineVectorData(
+  data: VectorLayerData,
+  opts?: { cap?: StrokeContourOptions['cap']; join?: StrokeContourOptions['join']; replace?: boolean },
+): VectorLayerData {
+  const cap = opts?.cap;
+  const join = opts?.join;
+  const replace = opts?.replace ?? false;
+  const subpaths: VectorSubpath[] = [];
+  for (const sub of data.subpaths) {
+    const width = sub.stroke?.width ?? 1;
+    const outline = strokeToOutlinePath(sub.path, { width, cap, join });
+    if (!outline) {
+      // 退化:元 subpath をそのまま残す。
+      subpaths.push(sub);
+      continue;
+    }
+    const fill = sub.stroke?.color ?? sub.fill ?? { r: 0, g: 0, b: 0, a: 255 };
+    const outlineSub: VectorSubpath = { path: outline, fill, stroke: null };
+    if (replace) {
+      subpaths.push(outlineSub);
+    } else {
+      subpaths.push(sub, outlineSub);
+    }
+  }
+  return updateVectorLayerData(data, { subpaths });
+}
+
+/** 全 subpath に行列を適用した新しい VectorLayerData を返す(不変)。US-4503 applyMatrixToPath へ委譲。 */
+export function transformVectorData(data: VectorLayerData, mat: Mat2x3): VectorLayerData {
+  const subpaths = data.subpaths.map((sub) => ({
+    ...sub,
+    path: applyMatrixToPath(sub.path, mat),
+  }));
+  return updateVectorLayerData(data, { subpaths });
+}
+
+/** 全 subpath を中心(既定=各パス重心)周りで回転した VectorLayerData。US-4503 rotatePath へ委譲。 */
+export function rotateVectorData(data: VectorLayerData, angle: number, cx?: number, cy?: number): VectorLayerData {
+  const subpaths = data.subpaths.map((sub) => ({
+    ...sub,
+    path: rotatePath(sub.path, angle, cx, cy),
+  }));
+  return updateVectorLayerData(data, { subpaths });
+}
+
+/** 全 subpath を中心周りでスキューした VectorLayerData。US-4503 skewPath へ委譲。 */
+export function skewVectorData(data: VectorLayerData, kx: number, ky: number, cx?: number, cy?: number): VectorLayerData {
+  const subpaths = data.subpaths.map((sub) => ({
+    ...sub,
+    path: skewPath(sub.path, kx, ky, cx, cy),
+  }));
+  return updateVectorLayerData(data, { subpaths });
+}
+
+/** 全 subpath を軸に対し鏡映した VectorLayerData。US-4503 mirrorPath へ委譲。 */
+export function mirrorVectorData(
+  data: VectorLayerData,
+  axis: 'x' | 'y',
+  pivot?: { x: number; y: number },
+): VectorLayerData {
+  const subpaths = data.subpaths.map((sub) => ({
+    ...sub,
+    path: mirrorPath(sub.path, axis, pivot),
+  }));
+  return updateVectorLayerData(data, { subpaths });
+}
+
 interface LayerEditDataSnapshot {
   shapeData?: ShapeData;
   vectorData?: VectorLayerData;
@@ -1129,6 +1251,16 @@ export interface AppState {
   addVectorLayer: (data?: Partial<VectorLayerData>) => void;
   updateActiveShapeLayer: (patch: Partial<ShapeData>) => void;
   updateActiveVectorLayer: (patch: Partial<VectorLayerData>) => void;
+  /** アクティブベクターレイヤーの全 subpath をアウトライン化(塗り化)して commitEdit する。 */
+  outlineActiveVectorLayer: (opts?: { cap?: StrokeContourOptions['cap']; join?: StrokeContourOptions['join']; replace?: boolean }) => void;
+  /** アクティブベクターレイヤーへ回転/スキュー/鏡映を適用し commitEdit する。 */
+  transformActiveVectorLayer: (op:
+    | { kind: 'rotate'; angle: number; cx?: number; cy?: number }
+    | { kind: 'skew'; kx: number; ky: number; cx?: number; cy?: number }
+    | { kind: 'mirror'; axis: 'x' | 'y'; pivot?: { x: number; y: number } }
+  ) => void;
+  /** アクティブベクターレイヤーの最初の stroke subpath に沿った等間隔点列(angle 付き)を返す(副作用なし)。 */
+  vectorPointsAlong: (spacing: number, offset?: number) => { x: number; y: number; angle: number }[];
 
   // selection
   setSelection: (sel: Selection | null) => void;
@@ -1948,6 +2080,59 @@ export const useStore = create<AppState>((set, get) => ({
     ));
     set({ doc: { ...doc, layers } });
     get().commitEdit('ベクター編集', layer.id, beforePixels, undefined, { vectorData: beforeVectorData });
+  },
+  outlineActiveVectorLayer: (opts) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || !layer.vectorData) return;
+
+    const beforePixels = layer.pixels.slice();
+    const beforeVectorData = cloneVectorLayerData(layer.vectorData);
+    const vectorData = outlineVectorData(layer.vectorData, opts);
+    const pixels = rasterizeVectorLayer(vectorData, doc.width, doc.height);
+    if (vectorLayerDataEquals(beforeVectorData, vectorData) && pixelsEqual(beforePixels, pixels)) return;
+
+    const layers = doc.layers.map((item) => (
+      item.id === layer.id ? { ...item, vectorData, pixels } : item
+    ));
+    set({ doc: { ...doc, layers } });
+    get().commitEdit('アウトライン化', layer.id, beforePixels, undefined, { vectorData: beforeVectorData });
+  },
+  transformActiveVectorLayer: (op) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.pixels || !layer.vectorData) return;
+
+    const beforePixels = layer.pixels.slice();
+    const beforeVectorData = cloneVectorLayerData(layer.vectorData);
+    let vectorData: VectorLayerData;
+    let label: string;
+    if (op.kind === 'rotate') {
+      vectorData = rotateVectorData(layer.vectorData, op.angle, op.cx, op.cy);
+      label = 'ベクター回転';
+    } else if (op.kind === 'skew') {
+      vectorData = skewVectorData(layer.vectorData, op.kx, op.ky, op.cx, op.cy);
+      label = 'ベクタースキュー';
+    } else {
+      vectorData = mirrorVectorData(layer.vectorData, op.axis, op.pivot);
+      label = 'ベクター鏡映';
+    }
+    const pixels = rasterizeVectorLayer(vectorData, doc.width, doc.height);
+    if (vectorLayerDataEquals(beforeVectorData, vectorData) && pixelsEqual(beforePixels, pixels)) return;
+
+    const layers = doc.layers.map((item) => (
+      item.id === layer.id ? { ...item, vectorData, pixels } : item
+    ));
+    set({ doc: { ...doc, layers } });
+    get().commitEdit(label, layer.id, beforePixels, undefined, { vectorData: beforeVectorData });
+  },
+  vectorPointsAlong: (spacing, offset) => {
+    const { doc } = get();
+    const layer = activeLayer(doc);
+    if (!layer?.vectorData) return [];
+    const sub = layer.vectorData.subpaths.find((s) => s.stroke) ?? layer.vectorData.subpaths[0];
+    if (!sub) return [];
+    return pointsAlongPath(sub.path, spacing, offset);
   },
 
   setSelection: (sel) => set({ doc: { ...get().doc, selection: sel }, rev: get().rev + 1 }),

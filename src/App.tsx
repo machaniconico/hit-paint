@@ -152,11 +152,14 @@ export function App() {
   const [canvasH, setCanvasH] = useState(s.doc.height);
   const [resizeFromCenter, setResizeFromCenter] = useState(false);
   const [effectBrushKind, setEffectBrushKind] = useState<EffectBrushKind>('blur');
+  const [vectorRotateDeg, setVectorRotateDeg] = useState(15);
+  const [vectorSkewX, setVectorSkewX] = useState(0.2);
   const toolDrag = useRef<ToolDrag | null>(null);
   const activeLayer = s.doc.layers.find((l) => l.id === s.doc.activeLayerId);
   const layerSwatches = s.activeLayerSwatches();
   const activeTextData = activeLayer?.textData;
   const activeShapeData = activeLayer?.shapeData;
+  const activeVectorData = activeLayer?.vectorData;
   const activeShapeFill = activeShapeData?.style.fill ?? null;
   const activeShapeStroke = activeShapeData?.style.stroke ?? null;
   const shapeCornerRadiusMax = activeShapeData
@@ -1326,6 +1329,74 @@ export function App() {
                     />
                   </label>
                 )}
+              </div>
+            )}
+            {activeVectorData && (
+              <div className="layer-effects vector-ops">
+                <h4>ベクター操作</h4>
+                <div className="layer-effect-grid">
+                  <button
+                    className="mini"
+                    onClick={() => s.outlineActiveVectorLayer({ cap: 'round', join: 'round' })}
+                  >
+                    アウトライン化
+                  </button>
+                  <button
+                    className="mini"
+                    onClick={() => s.transformActiveVectorLayer({ kind: 'mirror', axis: 'y' })}
+                  >
+                    左右反転
+                  </button>
+                  <button
+                    className="mini"
+                    onClick={() => s.transformActiveVectorLayer({ kind: 'mirror', axis: 'x' })}
+                  >
+                    上下反転
+                  </button>
+                </div>
+                <label>回転 <b>{vectorRotateDeg}°</b>
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={vectorRotateDeg}
+                    onChange={(e) => setVectorRotateDeg(Number(e.target.value))}
+                  />
+                </label>
+                <div className="layer-effect-grid">
+                  <button
+                    className="mini"
+                    onClick={() => s.transformActiveVectorLayer({
+                      kind: 'rotate',
+                      angle: (vectorRotateDeg * Math.PI) / 180,
+                    })}
+                  >
+                    回転を適用
+                  </button>
+                </div>
+                <label>スキューX <b>{vectorSkewX.toFixed(2)}</b>
+                  <input
+                    type="range"
+                    min={-1}
+                    max={1}
+                    step={0.05}
+                    value={vectorSkewX}
+                    onChange={(e) => setVectorSkewX(Number(e.target.value))}
+                  />
+                </label>
+                <div className="layer-effect-grid">
+                  <button
+                    className="mini"
+                    onClick={() => s.transformActiveVectorLayer({
+                      kind: 'skew',
+                      kx: vectorSkewX,
+                      ky: 0,
+                    })}
+                  >
+                    スキューを適用
+                  </button>
+                </div>
               </div>
             )}
             <div className="layer-effects">

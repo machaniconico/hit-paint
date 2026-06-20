@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (955 tests)
+npm test           # vitest (1021 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -102,6 +102,10 @@ start.cmd build    :: build / preview も同様
   高輝度部の発光ブルーム(`filters/bloom`)。チャンネルミキサー(`filters/channel-mixer`)と
   クラリティ(`filters/clarity`)もフィルターメニューに配線済み。
 - **パス簡略化 / 変換** — Douglas-Peucker 簡略化と AABB/平行移動/拡縮ユーティリティ(`vector/simplify`)。
+- **ベクター幾何ツールキット** — パスの弧長パラメータ化(`vector/path-measure` の `pathLength`/`pointAtLength`/`tangentAtLength`/`pointsAlong`=等間隔配置)、
+  ストロークの塗り可能アウトライン化(`vector/stroke-outline` の `strokeToOutline`、cap=butt/round/square・join=miter/round/bevel・miterLimit、CW 単一閉リング)、
+  パスのアフィン変換(`vector/path-transform` の `Mat2x3`/`applyMatrixToPath`/`rotatePath`/`skewPath`/`mirrorPath`、制御点も同一行列で変換)。
+  store/UI に等間隔配置・アウトライン化・回転/スキュー/反転を配線(純粋ヘルパ分離・Undo対応・既存パス挙動不変)。
 - **変位マップ / ハーフトーン / ノイズ** — R/G を変位に使う displacement map(`filters/displace`、bilinear)、
   網点スクリーンのハーフトーン(`filters/halftone`)、決定論的な value noise/fbm 生成(`engine/perlin`)。
 - **色収差 / 油彩 / パース変形** — radial な色収差(`filters/chromatic`)、エッジ保持の油彩 Kuwahara(`filters/oil`)、
