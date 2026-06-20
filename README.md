@@ -10,7 +10,7 @@ npm install
 npm run dev        # 開発サーバ (http://localhost:5173)
 npm run build      # 本番ビルド -> dist/
 npm run preview    # ビルド結果のプレビュー
-npm test           # vitest (901 tests)
+npm test           # vitest (955 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -72,6 +72,10 @@ start.cmd build    :: build / preview も同様
 - **描画補助** — 対称・ミラー描画(`engine/symmetry` の水平/垂直/4分割/放射)、
   ブラシダイナミクス(`engine/brush-dynamics` の決定論的サイズ/不透明度ジッター・散布)、
   カラーパレットと配色ハーモニー生成(`color/palette` の補色/類似色/トライアド/テトラード)。
+- **ブラシダイナミクス拡張** — 1打点ごとのカラーダイナミクス(`engine/brush-color-dynamics` の HSV 決定論ジッタ+前景背景ブレンド、
+  全振幅0でバイト同一)、デュアルブラシ(`engine/dual-brush` の二次テクスチャで主ブラシαを multiply/subtract/min/screen 変調・非破壊)、
+  エアブラシ滞留ビルドアップ(`engine/airbrush` の指数飽和 `buildupAlpha`/`accumulateDwell`、滞留が長いほど濃く・上限飽和)。
+  `BrushSettings` に optional 追加し store の打点処理(色決定/αバッファ変調/被覆蓄積を純粋ヘルパに分離)へ配線、UI スライダ追加。未指定は従来とバイト同一。
 - **アニメーション** — コマ撮りフレームのタイムライン管理(`anim/timeline` の追加/複製/並べ替え)と
   オニオンスキン合成(前後フレームを低不透明度で重ねる)。store/UI 配線済み(フレーム追加・移動・
   削除・オニオン切替、フレーム間で画素バッファ非共有)。

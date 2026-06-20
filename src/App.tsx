@@ -516,6 +516,72 @@ export function App() {
                 onChange={(e) => s.setBrush({ pressureOpacity: e.target.checked })} />
               筆圧→不透明度
             </label>
+            {/* カラーダイナミクス(US-4401/4404)。ON のとき 1 打点ごとに色相/明度を
+                決定論ジッタ。OFF(null)なら従来どおり単色でバイト同一。 */}
+            <label className="check">
+              <input type="checkbox" checked={!!s.brush.colorDynamics}
+                onChange={(e) => s.setBrush({
+                  colorDynamics: e.target.checked
+                    ? { hueJitter: 0.1, satJitter: 0.1, valueJitter: 0.1, fgBgJitter: 0 }
+                    : null,
+                })} />
+              カラーダイナミクス
+            </label>
+            {s.brush.colorDynamics ? (
+              <>
+                <label>色相ジッタ <b>{Math.round((s.brush.colorDynamics.hueJitter ?? 0) * 100)}%</b>
+                  <input type="range" min={0} max={100}
+                    value={Math.round((s.brush.colorDynamics.hueJitter ?? 0) * 100)}
+                    onChange={(e) => s.setBrush({
+                      colorDynamics: { ...s.brush.colorDynamics!, hueJitter: +e.target.value / 100 },
+                    })} />
+                </label>
+                <label>彩度ジッタ <b>{Math.round((s.brush.colorDynamics.satJitter ?? 0) * 100)}%</b>
+                  <input type="range" min={0} max={100}
+                    value={Math.round((s.brush.colorDynamics.satJitter ?? 0) * 100)}
+                    onChange={(e) => s.setBrush({
+                      colorDynamics: { ...s.brush.colorDynamics!, satJitter: +e.target.value / 100 },
+                    })} />
+                </label>
+                <label>明度ジッタ <b>{Math.round((s.brush.colorDynamics.valueJitter ?? 0) * 100)}%</b>
+                  <input type="range" min={0} max={100}
+                    value={Math.round((s.brush.colorDynamics.valueJitter ?? 0) * 100)}
+                    onChange={(e) => s.setBrush({
+                      colorDynamics: { ...s.brush.colorDynamics!, valueJitter: +e.target.value / 100 },
+                    })} />
+                </label>
+                <label>前景背景ジッタ <b>{Math.round((s.brush.colorDynamics.fgBgJitter ?? 0) * 100)}%</b>
+                  <input type="range" min={0} max={100}
+                    value={Math.round((s.brush.colorDynamics.fgBgJitter ?? 0) * 100)}
+                    onChange={(e) => s.setBrush({
+                      colorDynamics: { ...s.brush.colorDynamics!, fgBgJitter: +e.target.value / 100 },
+                    })} />
+                </label>
+              </>
+            ) : null}
+            {/* エアブラシ滞留ビルドアップ(US-4403/4404)。flow=0 で従来 max 合成(バイト同一)。 */}
+            <label>エアブラシ流量 <b>{Math.round((s.brush.airbrushFlow ?? 0) * 100)}%</b>
+              <input type="range" min={0} max={100}
+                value={Math.round((s.brush.airbrushFlow ?? 0) * 100)}
+                onChange={(e) => s.setBrush({ airbrushFlow: +e.target.value / 100 })} />
+            </label>
+            {s.brush.airbrushFlow && s.brush.airbrushFlow > 0 ? (
+              <label>エアブラシ上限 <b>{Math.round((s.brush.airbrushCeiling ?? 1) * 100)}%</b>
+                <input type="range" min={0} max={100}
+                  value={Math.round((s.brush.airbrushCeiling ?? 1) * 100)}
+                  onChange={(e) => s.setBrush({ airbrushCeiling: +e.target.value / 100 })} />
+              </label>
+            ) : null}
+            {/* デュアルブラシ強度(US-4402/4404)。tip ブラシかつ secondary がある時のみ有効。 */}
+            {s.brush.tip && s.brush.dualBrush ? (
+              <label>デュアル強度 <b>{Math.round((s.brush.dualBrush.strength ?? 0) * 100)}%</b>
+                <input type="range" min={0} max={100}
+                  value={Math.round((s.brush.dualBrush.strength ?? 0) * 100)}
+                  onChange={(e) => s.setBrush({
+                    dualBrush: { ...s.brush.dualBrush!, strength: +e.target.value / 100 },
+                  })} />
+              </label>
+            ) : null}
             {s.brush.tip ? (
               <>
                 {/* tip ブラシ専用の描き味設定(US-3904)。tip 無しブラシには表示しない。 */}

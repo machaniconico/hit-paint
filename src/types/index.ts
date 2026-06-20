@@ -166,6 +166,30 @@ export interface BrushSettings {
   tipScatter?: number;
   /** 1打点あたりの散布スタンプ数。 */
   tipScatterDensity?: number;
+  /**
+   * カラーダイナミクス(US-4401/4404)。設定があるときのみ 1 打点ごとに前景色を
+   * HSV 空間で決定論ジッタ + 前景/背景ブレンドする。undefined なら従来どおり
+   * 単色コミット(バイト同一)。
+   */
+  colorDynamics?: import('../engine/brush-color-dynamics').ColorDynamicsConfig | null;
+  /**
+   * デュアルブラシ(US-4402/4404)。tip ブラシのαバッファを二次テクスチャで変調する。
+   * undefined なら無変調(従来どおり)。secondary は行優先 0..1 の Float32Array。
+   */
+  dualBrush?: {
+    secondary: Float32Array;
+    secondaryWidth: number;
+    secondaryHeight: number;
+    mode: import('../engine/dual-brush').DualBlendMode;
+    strength: number;
+  } | null;
+  /**
+   * エアブラシ滞留ビルドアップ(US-4403/4404)。flow>0 のとき同一打点が重なるほど
+   * 指定 ceiling へ向けて指数飽和で濃くなる。undefined なら従来どおり max 合成。
+   */
+  airbrushFlow?: number;
+  /** エアブラシ蓄積の上限α(0..1)。airbrushFlow>0 のときのみ使用。 */
+  airbrushCeiling?: number;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {

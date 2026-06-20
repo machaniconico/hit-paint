@@ -136,6 +136,9 @@ import {
   type BrushPreset,
   type BrushPresetLibrary,
 } from '../engine/brush-presets';
+import { applyColorDynamics, type ColorDynamicsConfig } from '../engine/brush-color-dynamics';
+import { applyDualBrush } from '../engine/dual-brush';
+import { buildupAlpha } from '../engine/airbrush';
 
 type Maskless<T> = Omit<T, 'mask'>;
 type DuotoneColor = DuotoneOptions['shadow'] | RGBA;
@@ -276,7 +279,89 @@ function dabFalloff(d: number, hardness: number, pixel: boolean): number {
   return 1 - (t * t * (3 - 2 * t));
 }
 
-class StoreStrokeEngine {
+// ---------------------------------------------------------------------------
+// Wave42 ブラシダイナミクス配線 — 副作用無しの純粋ヘルパ群(US-4404)。
+//
+// store のストローク経路から呼ぶロジックの核を引数→戻り値の関数に切り出し、
+// jsdom(canvas 不可)でも純粋配列・数値で検証できるようにする。いずれも
+// 「設定が未指定(undefined/null) なら従来と完全一致」を保証する分岐を持つ。
+// ---------------------------------------------------------------------------
+
+/**
+ * 1打点の打点色を決定する。colorDynamics が未指定/null なら base をそのまま返し
+ * (バイト同一)、設定があれば applyColorDynamics 単体と完全一致する色を返す。
+ *
+ * seed/step は engine のストローク歩進(dabStep)に整合させて渡す。pressure/bg は
+ * 前景背景ブレンド・筆圧連動に使う(applyColorDynamics の opts へ素通し)。
+ */
+export function resolveDabColor(
+  base: RGBA,
+  cfg: ColorDynamicsConfig | null | undefined,
+  seed: number,
+  step: number,
+  opts?: { pressure?: number; bg?: RGBA },
+): RGBA {
+  if (!cfg) return { r: base.r, g: base.g, b: base.b, a: base.a };
+  return applyColorDynamics(base, cfg, seed, step, opts);
+}
+
+/** resolveDabColor に渡す dualBrush 設定の最小形(BrushSettings.dualBrush 相当)。 */
+export interface DualBrushModulation {
+  secondary: Float32Array;
+  secondaryWidth: number;
+  secondaryHeight: number;
+  mode: import('../engine/dual-brush').DualBlendMode;
+  strength: number;
+}
+
+/**
+ * tip ブラシのαバッファをデュアルブラシ二次テクスチャで変調する。設定が
+ * 未指定/null なら入力 alpha をそのまま返し(参照同一=従来経路バイト不変)、
+ * 設定があれば applyDualBrush 単体と完全一致した「新しい」Float32Array を返す。
+ */
+export function modulateTipAlpha(
+  alpha: Float32Array,
+  width: number,
+  height: number,
+  dual: DualBrushModulation | null | undefined,
+): Float32Array {
+  if (!dual) return alpha;
+  return applyDualBrush(
+    alpha,
+    width,
+    height,
+    dual.secondary,
+    dual.secondaryWidth,
+    dual.secondaryHeight,
+    dual.mode,
+    dual.strength,
+  );
+}
+
+/**
+ * coverage バッファへ 1 打点の寄与 contribution(0..1)を蓄積した結果を返す。
+ *
+ * - airbrushFlow が未指定/<=0 のとき: 従来どおり max 合成(prev と contribution の
+ *   大きい方)。既存ストロークとバイト同一。
+ * - airbrushFlow>0 のとき: エアブラシ滞留として buildupAlpha で prev から
+ *   ceiling へ向け指数飽和で積み上げる(dt=contribution を1ステップ滞留時間と見なす)。
+ *   contribution が大きい打点ほど速く ceiling へ近づく。決定論。
+ */
+export function accumulateCoverage(
+  prev: number,
+  contribution: number,
+  airbrushFlow: number | undefined,
+  airbrushCeiling: number | undefined,
+): number {
+  if (!airbrushFlow || airbrushFlow <= 0) {
+    return contribution > prev ? contribution : prev;
+  }
+  const ceiling = airbrushCeiling === undefined ? 1 : airbrushCeiling;
+  // 既に天井以上なら不変。contribution を滞留時間 dt と見なし指数飽和で積む。
+  return buildupAlpha(prev, airbrushFlow, contribution, ceiling);
+}
+
+export class StoreStrokeEngine {
   readonly width: number;
   readonly height: number;
   readonly coverage: Float32Array;
@@ -290,6 +375,25 @@ class StoreStrokeEngine {
   private dabStep = 0;
   /** ストローク進行方向(ラジアン)。先頭シード打点など方向未定義時は null(US-3904)。 */
   private lastDirAngle: number | null = null;
+  /**
+   * デュアルブラシ変調済み tip(US-4402/4404)。brush.dualBrush 設定があるときのみ
+   * 構築し、以降のスタンプではこれを使う。未設定なら null=従来 tip をそのまま使う。
+   */
+  private dualTip: import('../engine/tip-stamp').TipAlpha | null = null;
+  /**
+   * カラーダイナミクス用の per-pixel RGB 蓄積バッファ(US-4401/4404)。
+   * brush.colorDynamics 設定があるときのみ確保し、打点ごとのジッタ色を coverage 加重で
+   * 累積する。commit はこれを色源にする。未設定なら null=単色コミット(バイト同一)。
+   */
+  private colorR: Float32Array | null = null;
+  private colorG: Float32Array | null = null;
+  private colorB: Float32Array | null = null;
+  /** 各画素の色蓄積に使った coverage 加重の総和(commit 正規化の分母)。 */
+  private colorW: Float32Array | null = null;
+  /** カラーダイナミクスの前景背景ブレンド用背景色(設定時のみ)。 */
+  private bgColor: RGBA | null = null;
+  /** カラーダイナミクスのジッタ基準となる前景色(設定時のみ。既定は黒)。 */
+  private commitColor: RGBA = BLACK;
 
   constructor(
     width: number,
@@ -298,6 +402,8 @@ class StoreStrokeEngine {
     erase: boolean,
     symmetry: SymmetryConfig,
     dynamics: DynamicsConfig,
+    baseColor?: RGBA,
+    bg?: RGBA,
   ) {
     this.width = width;
     this.height = height;
@@ -306,9 +412,33 @@ class StoreStrokeEngine {
     this.symmetry = symmetry;
     this.dynamics = dynamics;
     this.coverage = new Float32Array(width * height);
+
+    // デュアルブラシ: tip がありかつ設定があれば α を変調した新 tip を1度だけ構築。
+    const dual = brush.dualBrush;
+    if (brush.tip && dual) {
+      const modData = modulateTipAlpha(
+        brush.tip.data,
+        brush.tip.width,
+        brush.tip.height,
+        dual,
+      );
+      this.dualTip = { width: brush.tip.width, height: brush.tip.height, data: modData };
+    }
+
+    // カラーダイナミクス: 設定があれば RGB 蓄積バッファ・前景/背景色を用意。
+    if (brush.colorDynamics) {
+      this.colorR = new Float32Array(width * height);
+      this.colorG = new Float32Array(width * height);
+      this.colorB = new Float32Array(width * height);
+      this.colorW = new Float32Array(width * height);
+      this.commitColor = baseColor
+        ? { r: baseColor.r, g: baseColor.g, b: baseColor.b, a: baseColor.a }
+        : BLACK;
+      this.bgColor = bg ? { r: bg.r, g: bg.g, b: bg.b, a: bg.a } : null;
+    }
   }
 
-  private stampCoverage(x: number, y: number, size: number, flow: number): void {
+  private stampCoverage(x: number, y: number, size: number, flow: number, dabColor?: RGBA): void {
     const radius = size / 2;
     if (radius <= 0 || flow <= 0) return;
     const pixel = this.brush.shape === 'pixel';
@@ -326,7 +456,22 @@ class StoreStrokeEngine {
         const a = dabFalloff(d, hardness, pixel) * flow;
         if (a <= 0) continue;
         const idx = py * this.width + px;
-        if (a > this.coverage[idx]) this.coverage[idx] = a;
+        // 既定(airbrushFlow 未指定)は max 合成で従来とバイト同一。
+        // airbrushFlow>0 のときのみ滞留ビルドアップで積み上げる(US-4403/4404)。
+        const next = accumulateCoverage(
+          this.coverage[idx],
+          a,
+          this.brush.airbrushFlow,
+          this.brush.airbrushCeiling,
+        );
+        if (next !== this.coverage[idx]) this.coverage[idx] = next;
+        // カラーダイナミクス: 打点色を coverage 寄与 a で加重累積(設定時のみ)。
+        if (dabColor && this.colorR && this.colorG && this.colorB && this.colorW) {
+          this.colorR[idx] += dabColor.r * a;
+          this.colorG[idx] += dabColor.g * a;
+          this.colorB[idx] += dabColor.b * a;
+          this.colorW[idx] += a;
+        }
       }
     }
   }
@@ -344,13 +489,25 @@ class StoreStrokeEngine {
       this.dynamics,
       this.dabStep,
     );
+    // この打点の決定論 step(増分前の値)。カラーダイナミクスの seed に使う。
+    const colorStep = this.dabStep;
     this.dabStep += 1;
 
     const opacityScale = this.brush.opacity > 0 ? dab.opacity / this.brush.opacity : 1;
     const flow = this.brush.flow * opacityPressure * opacityScale;
 
+    // カラーダイナミクス: 設定があるときのみ打点色を決定論ジッタ(未設定なら未使用)。
+    // seed=0 固定 + step=colorStep で applyColorDynamics 単体と完全一致する。
+    const dabColor = this.brush.colorDynamics
+      ? resolveDabColor(this.commitColor, this.brush.colorDynamics, 0, colorStep, {
+          pressure,
+          bg: this.bgColor ?? undefined,
+        })
+      : undefined;
+
     // .sut 配布ブラシの任意形状 tip があれば、数式 dab の代わりに tip をスタンプする。
-    const tip = this.brush.tip;
+    // デュアルブラシ変調済み tip があればそれを優先する(US-4402/4404)。
+    const tip = this.dualTip ?? this.brush.tip;
     if (tip) {
       // 筆圧カーブがあれば size/flow に倍率を掛ける(無ければ素通り)。
       const sizeCurve = this.brush.pressureSizeCurve;
@@ -433,7 +590,7 @@ class StoreStrokeEngine {
       ? [{ x: dab.x, y: dab.y }]
       : mirrorPoints(dab.x, dab.y, this.symmetry);
     for (const point of points) {
-      this.stampCoverage(point.x, point.y, dab.size, flow);
+      this.stampCoverage(point.x, point.y, dab.size, flow, dabColor);
     }
   }
 
@@ -478,6 +635,8 @@ class StoreStrokeEngine {
 
   commit(target: Uint8ClampedArray, color: RGBA, selection?: Uint8ClampedArray | null): void {
     const opacity = this.brush.opacity;
+    // カラーダイナミクス有効時のみ per-pixel 蓄積色を使う(commit シグネチャは不変)。
+    const useColorBuf = this.colorR !== null && this.colorW !== null;
     for (let i = 0; i < this.coverage.length; i += 1) {
       let cov = this.coverage[i] * opacity;
       if (cov <= 0) continue;
@@ -488,13 +647,25 @@ class StoreStrokeEngine {
         target[o + 3] = target[o + 3] * (1 - cov);
         continue;
       }
+      // 既定: 単色 color。カラーダイナミクス時: coverage 加重平均した蓄積色。
+      let cr = color.r;
+      let cg = color.g;
+      let cb = color.b;
+      if (useColorBuf) {
+        const w = this.colorW![i];
+        if (w > 0) {
+          cr = this.colorR![i] / w;
+          cg = this.colorG![i] / w;
+          cb = this.colorB![i] / w;
+        }
+      }
       const sa = cov;
       const da = target[o + 3] / 255;
       const oa = sa + da * (1 - sa);
       if (oa <= 0) continue;
-      target[o] = (color.r * sa + target[o] * da * (1 - sa)) / oa;
-      target[o + 1] = (color.g * sa + target[o + 1] * da * (1 - sa)) / oa;
-      target[o + 2] = (color.b * sa + target[o + 2] * da * (1 - sa)) / oa;
+      target[o] = (cr * sa + target[o] * da * (1 - sa)) / oa;
+      target[o + 1] = (cg * sa + target[o + 1] * da * (1 - sa)) / oa;
+      target[o + 2] = (cb * sa + target[o + 2] * da * (1 - sa)) / oa;
       target[o + 3] = oa * 255;
     }
   }
@@ -1283,6 +1454,8 @@ export const useStore = create<AppState>((set, get) => ({
       erase,
       symmetry,
       dynamics,
+      primary,
+      get().secondary,
     );
     engine.addSample(s);
     activeStroke = {
